@@ -1,6 +1,8 @@
 # pi-skill-palette
 
-A VS Code/Amp-style command palette for quickly selecting and applying skills to your next message in [pi](https://github.com/badlogic/pi).
+Trigger [pi](https://github.com/badlogic/pi) skills on demand with a VS Code/Amp-style command palette.
+
+Instead of relying on the agent to automatically invoke skills based on task context, this extension lets you explicitly select which skill to apply to your next message.
 
 <img width="1261" alt="Skill Palette" src="https://github.com/user-attachments/assets/a02602be-4b7b-424a-bec0-a3aeba92f09d" />
 
