@@ -197,7 +197,9 @@ class ConfirmDialog {
 		}, 30000);
 		
 		this.intervalId = setInterval(() => {
-			this.remainingSeconds--;
+			if (this.remainingSeconds > 0) {
+				this.remainingSeconds--;
+			}
 		}, 1000);
 	}
 
@@ -302,7 +304,7 @@ class ConfirmDialog {
 		lines.push(emptyRow());
 
 		// Timeout - subtle progress indicator
-		const progress = Math.round((this.remainingSeconds / 30) * 10);
+		const progress = Math.max(0, Math.min(10, Math.round((this.remainingSeconds / 30) * 10)));
 		const progressBar = "●".repeat(progress) + "○".repeat(10 - progress);
 		lines.push(centerRow(dim(`${progressBar}  ${this.remainingSeconds}s`)));
 
@@ -334,6 +336,8 @@ class SkillPaletteComponent {
 	private selected = 0;
 	private query = "";
 	private queuedSkillName: string | null;
+	private inactivityTimeout: ReturnType<typeof setTimeout> | null = null;
+	private static readonly INACTIVITY_MS = 60000; // Auto-dismiss after 60s of no input
 
 	constructor(
 		skills: Skill[],
@@ -343,10 +347,22 @@ class SkillPaletteComponent {
 		this.allSkills = skills;
 		this.filtered = skills;
 		this.queuedSkillName = queuedSkill?.name ?? null;
+		this.resetInactivityTimeout();
+	}
+
+	private resetInactivityTimeout(): void {
+		if (this.inactivityTimeout) clearTimeout(this.inactivityTimeout);
+		this.inactivityTimeout = setTimeout(() => {
+			this.cleanup();
+			this.done(null, "cancel");
+		}, SkillPaletteComponent.INACTIVITY_MS);
 	}
 
 	handleInput(data: string): void {
+		this.resetInactivityTimeout(); // Reset on any input
+
 		if (matchesKey(data, "escape")) {
+			this.cleanup();
 			this.done(null, "cancel");
 			return;
 		}
@@ -354,6 +370,7 @@ class SkillPaletteComponent {
 		if (matchesKey(data, "return")) {
 			const skill = this.filtered[this.selected];
 			if (skill) {
+				this.cleanup();
 				// Toggle: if already queued, unqueue it
 				if (skill.name === this.queuedSkillName) {
 					this.done(skill, "unqueue");
@@ -464,10 +481,11 @@ class SkillPaletteComponent {
 				const prefix = isSelected ? cyan("▸") : dim("·");
 				const queuedBadge = isQueued ? ` ${green("●")}` : "";
 				const nameStr = isSelected ? bold(cyan(skill.name)) : skill.name;
-				const maxDescLen = innerW - visLen(skill.name) - 12;
-				const descStr = dim(truncate(skill.description, maxDescLen));
+				const maxDescLen = Math.max(0, innerW - visLen(skill.name) - 12);
+				const descStr = maxDescLen > 3 ? dim(truncate(skill.description, maxDescLen)) : "";
 				
-				const skillLine = `${prefix} ${nameStr}${queuedBadge}  ${dim("—")}  ${descStr}`;
+				const separator = descStr ? `  ${dim("—")}  ` : "";
+				const skillLine = `${prefix} ${nameStr}${queuedBadge}${separator}${descStr}`;
 				lines.push(row(skillLine));
 			}
 			lines.push(emptyRow());
@@ -499,8 +517,18 @@ class SkillPaletteComponent {
 		return lines;
 	}
 
+	private cleanup(): void {
+		if (this.inactivityTimeout) {
+			clearTimeout(this.inactivityTimeout);
+			this.inactivityTimeout = null;
+		}
+	}
+
 	invalidate(): void {}
-	dispose(): void {}
+	
+	dispose(): void {
+		this.cleanup();
+	}
 }
 
 export default function skillPaletteExtension(pi: ExtensionAPI): void {

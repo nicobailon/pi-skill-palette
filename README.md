@@ -2,6 +2,10 @@
 
 A VS Code/Amp-style command palette for quickly selecting and applying skills to your next message in [pi](https://github.com/badlogic/pi).
 
+<img width="1261" alt="Skill Palette" src="https://github.com/user-attachments/assets/a02602be-4b7b-424a-bec0-a3aeba92f09d" />
+
+<img width="1263" alt="Unqueue Confirmation" src="https://github.com/user-attachments/assets/8ad93c58-e6e9-4c71-a0b9-41af9efe9311" />
+
 ## Features
 
 - **Quick Access**: `/skill` command opens an elegant overlay
