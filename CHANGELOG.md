@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **Theming system** — Load custom colors from `theme.json` with fallback to defaults
+- **Rainbow progress dots** — Spaced out dots with rainbow gradient (matching powerline-footer)
+- **Skill content preview** — Message renderer shows actual skill content in collapsible block
+- **Expandable content** — Click to expand full skill content in chat
+
+### Fixed
+- **Import package** — Changed from `@anthropic-ai/claude-code` to `@mariozechner/pi-coding-agent`
+- **Countdown timer** — Unqueue dialog timer now actually updates visually
+- **Array content handling** — Message renderer handles both string and TextContent[] formats
+
+### Changed
+- Skill injection now sets `display: true` to show content in chat
+
+### Removed
+- Unused `progress` theme property (progress dots use rainbow colors directly)
+
 ## [1.0.0] - 2025-01-09
 
 ### Added

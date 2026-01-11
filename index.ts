@@ -10,8 +10,8 @@
  * https://github.com/nicobailon/pi-skill-palette
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@anthropic-ai/claude-code";
-import { matchesKey } from "@mariozechner/pi-tui";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { matchesKey, Container, Text } from "@mariozechner/pi-tui";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -30,6 +30,83 @@ interface SkillPaletteState {
 const state: SkillPaletteState = {
 	queuedSkill: null,
 };
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Theming
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface PaletteTheme {
+	border: string;        // Box borders
+	title: string;         // Title text
+	selected: string;      // Selected item highlight
+	selectedText: string;  // Selected item text
+	queued: string;        // Queued badge
+	searchIcon: string;    // Search icon
+	placeholder: string;   // Placeholder text
+	description: string;   // Skill descriptions
+	hint: string;          // Footer hints
+	confirm: string;       // Confirm button (keep)
+	cancel: string;        // Cancel button (remove)
+}
+
+const DEFAULT_THEME: PaletteTheme = {
+	border: "2",           // dim
+	title: "2",            // dim
+	selected: "36",        // cyan
+	selectedText: "36",    // cyan
+	queued: "32",          // green
+	searchIcon: "2",       // dim
+	placeholder: "2;3",    // dim italic
+	description: "2",      // dim
+	hint: "2",             // dim
+	confirm: "32",         // green
+	cancel: "31",          // red
+};
+
+function loadTheme(): PaletteTheme {
+	const configPath = path.join(os.homedir(), ".pi", "agent", "extensions", "pi-skill-palette", "theme.json");
+	try {
+		if (fs.existsSync(configPath)) {
+			const content = fs.readFileSync(configPath, "utf-8");
+			const custom = JSON.parse(content) as Partial<PaletteTheme>;
+			return { ...DEFAULT_THEME, ...custom };
+		}
+	} catch {
+		// Ignore errors, use default
+	}
+	return DEFAULT_THEME;
+}
+
+function fg(code: string, text: string): string {
+	if (!code) return text;
+	// Handle compound codes like "2;3" (dim + italic)
+	return `\x1b[${code}m${text}\x1b[0m`;
+}
+
+// Rainbow colors (matching powerline-footer thinking:high)
+const RAINBOW_COLORS = [
+	"38;2;178;129;214",  // #b281d6 purple
+	"38;2;215;135;175",  // #d787af pink
+	"38;2;254;188;56",   // #febc38 orange
+	"38;2;228;192;15",   // #e4c00f yellow
+	"38;2;137;210;129",  // #89d281 green
+	"38;2;0;175;175",    // #00afaf cyan
+	"38;2;23;143;185",   // #178fb9 blue
+];
+
+// Render spaced rainbow progress dots
+function rainbowProgress(filled: number, total: number): string {
+	const dots: string[] = [];
+	for (let i = 0; i < total; i++) {
+		const color = RAINBOW_COLORS[i % RAINBOW_COLORS.length];
+		const dot = i < filled ? "●" : "○";
+		dots.push(fg(color, dot));
+	}
+	return dots.join(" ");
+}
+
+// Load theme once at startup
+const paletteTheme = loadTheme();
 
 /**
  * Load skills from known directories
@@ -186,6 +263,7 @@ class ConfirmDialog {
 	private timeoutId: ReturnType<typeof setTimeout> | null = null;
 	private remainingSeconds = 30;
 	private intervalId: ReturnType<typeof setInterval> | null = null;
+	private requestRender: (() => void) | null = null;
 
 	constructor(
 		private skillName: string,
@@ -195,10 +273,16 @@ class ConfirmDialog {
 			this.cleanup();
 			this.done(false);
 		}, 30000);
-		
+	}
+
+	/** Call after construction to start the countdown timer */
+	setRequestRender(fn: () => void): void {
+		this.requestRender = fn;
+		// Start interval now that we can trigger re-renders
 		this.intervalId = setInterval(() => {
 			if (this.remainingSeconds > 0) {
 				this.remainingSeconds--;
+				this.requestRender?.();
 			}
 		}, 1000);
 	}
@@ -244,13 +328,16 @@ class ConfirmDialog {
 		const innerW = w - 2;
 		const lines: string[] = [];
 
-		// ANSI codes
-		const dim = (s: string) => `\x1b[2m${s}\x1b[22m`;
+		// Theme-aware color helpers
+		const t = paletteTheme;
+		const border = (s: string) => fg(t.border, s);
+		const title = (s: string) => fg(t.title, s);
+		const selected = (s: string) => fg(t.selected, s);
+		const confirm = (s: string) => fg(t.confirm, s);
+		const cancel = (s: string) => fg(t.cancel, s);
+		const hint = (s: string) => fg(t.hint, s);
 		const bold = (s: string) => `\x1b[1m${s}\x1b[22m`;
 		const italic = (s: string) => `\x1b[3m${s}\x1b[23m`;
-		const red = (s: string) => `\x1b[31m${s}\x1b[39m`;
-		const green = (s: string) => `\x1b[32m${s}\x1b[39m`;
-		const yellow = (s: string) => `\x1b[33m${s}\x1b[39m`;
 		const inverse = (s: string) => `\x1b[7m${s}\x1b[27m`;
 
 		const visLen = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "").length;
@@ -265,26 +352,26 @@ class ConfirmDialog {
 			return " ".repeat(left) + s + " ".repeat(padding - left);
 		};
 
-		const row = (content: string) => dim("│") + pad(" " + content, innerW) + dim("│");
-		const centerRow = (content: string) => dim("│") + center(content, innerW) + dim("│");
-		const emptyRow = () => dim("│") + " ".repeat(innerW) + dim("│");
+		const row = (content: string) => border("│") + pad(" " + content, innerW) + border("│");
+		const centerRow = (content: string) => border("│") + center(content, innerW) + border("│");
+		const emptyRow = () => border("│") + " ".repeat(innerW) + border("│");
 
 		// Top border with title
-		const title = " Unqueue Skill ";
-		const borderLen = innerW - visLen(title);
+		const titleText = " Unqueue Skill ";
+		const borderLen = innerW - visLen(titleText);
 		const leftBorder = Math.floor(borderLen / 2);
 		const rightBorder = borderLen - leftBorder;
-		lines.push(dim("╭" + "─".repeat(leftBorder)) + dim(title) + dim("─".repeat(rightBorder) + "╮"));
+		lines.push(border("╭" + "─".repeat(leftBorder)) + title(titleText) + border("─".repeat(rightBorder) + "╮"));
 
 		lines.push(emptyRow());
 		
 		// Skill name with icon
-		lines.push(centerRow(`${yellow("◆")} ${bold(this.skillName)}`));
+		lines.push(centerRow(`${selected("◆")} ${bold(this.skillName)}`));
 		
 		lines.push(emptyRow());
 
 		// Divider
-		lines.push(dim("├" + "─".repeat(innerW) + "┤"));
+		lines.push(border("├" + "─".repeat(innerW) + "┤"));
 		
 		lines.push(emptyRow());
 
@@ -293,28 +380,28 @@ class ConfirmDialog {
 		const keepLabel = "  Keep  ";
 		
 		const removeBtn = this.selected === 0 
-			? inverse(bold(red(removeLabel)))
-			: dim(removeLabel);
+			? inverse(bold(cancel(removeLabel)))
+			: hint(removeLabel);
 		const keepBtn = this.selected === 1 
-			? inverse(bold(green(keepLabel)))
-			: dim(keepLabel);
+			? inverse(bold(confirm(keepLabel)))
+			: hint(keepLabel);
 		
 		lines.push(centerRow(`${removeBtn}   ${keepBtn}`));
 
 		lines.push(emptyRow());
 
-		// Timeout - subtle progress indicator
-		const progress = Math.max(0, Math.min(10, Math.round((this.remainingSeconds / 30) * 10)));
-		const progressBar = "●".repeat(progress) + "○".repeat(10 - progress);
-		lines.push(centerRow(dim(`${progressBar}  ${this.remainingSeconds}s`)));
+		// Timeout - rainbow progress indicator
+		const prog = Math.max(0, Math.min(10, Math.round((this.remainingSeconds / 30) * 10)));
+		const progressBar = rainbowProgress(prog, 10);
+		lines.push(centerRow(`${progressBar}  ${hint(`${this.remainingSeconds}s`)}`));
 
 		lines.push(emptyRow());
 
 		// Footer hints - minimal
-		lines.push(centerRow(dim(italic("tab") + " switch  " + italic("enter") + " confirm  " + italic("esc") + " cancel")));
+		lines.push(centerRow(hint(italic("tab") + " switch  " + italic("enter") + " confirm  " + italic("esc") + " cancel")));
 
 		// Bottom border
-		lines.push(dim(`╰${"─".repeat(innerW)}╯`));
+		lines.push(border(`╰${"─".repeat(innerW)}╯`));
 
 		return lines;
 	}
@@ -420,12 +507,19 @@ class SkillPaletteComponent {
 		const innerW = w - 2;
 		const lines: string[] = [];
 
-		// ANSI codes
-		const dim = (s: string) => `\x1b[2m${s}\x1b[22m`;
+		// Theme-aware color helpers
+		const t = paletteTheme;
+		const border = (s: string) => fg(t.border, s);
+		const title = (s: string) => fg(t.title, s);
+		const selected = (s: string) => fg(t.selected, s);
+		const selectedText = (s: string) => fg(t.selectedText, s);
+		const queued = (s: string) => fg(t.queued, s);
+		const searchIcon = (s: string) => fg(t.searchIcon, s);
+		const placeholder = (s: string) => fg(t.placeholder, s);
+		const description = (s: string) => fg(t.description, s);
+		const hint = (s: string) => fg(t.hint, s);
 		const bold = (s: string) => `\x1b[1m${s}\x1b[22m`;
 		const italic = (s: string) => `\x1b[3m${s}\x1b[23m`;
-		const cyan = (s: string) => `\x1b[36m${s}\x1b[39m`;
-		const green = (s: string) => `\x1b[32m${s}\x1b[39m`;
 
 		const visLen = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "").length;
 
@@ -438,28 +532,28 @@ class SkillPaletteComponent {
 			return s.slice(0, maxLen - 1) + "…";
 		};
 
-		const row = (content: string) => dim("│") + pad(" " + content, innerW) + dim("│");
-		const emptyRow = () => dim("│") + " ".repeat(innerW) + dim("│");
+		const row = (content: string) => border("│") + pad(" " + content, innerW) + border("│");
+		const emptyRow = () => border("│") + " ".repeat(innerW) + border("│");
 
 		// Top border with title
-		const title = " Skills ";
-		const borderLen = innerW - visLen(title);
+		const titleText = " Skills ";
+		const borderLen = innerW - visLen(titleText);
 		const leftBorder = Math.floor(borderLen / 2);
 		const rightBorder = borderLen - leftBorder;
-		lines.push(dim("╭" + "─".repeat(leftBorder)) + dim(title) + dim("─".repeat(rightBorder) + "╮"));
+		lines.push(border("╭" + "─".repeat(leftBorder)) + title(titleText) + border("─".repeat(rightBorder) + "╮"));
 
 		lines.push(emptyRow());
 
 		// Search input - clean underlined style
-		const cursor = cyan("│");
-		const searchIcon = dim("◎");
-		const queryDisplay = this.query || dim(italic("type to filter..."));
-		lines.push(row(`${searchIcon}  ${queryDisplay}${cursor}`));
+		const cursor = selected("│");
+		const searchIconChar = searchIcon("◎");
+		const queryDisplay = this.query || placeholder(italic("type to filter..."));
+		lines.push(row(`${searchIconChar}  ${queryDisplay}${cursor}`));
 
 		lines.push(emptyRow());
 
 		// Divider
-		lines.push(dim("├" + "─".repeat(innerW) + "┤"));
+		lines.push(border("├" + "─".repeat(innerW) + "┤"));
 
 		// Skills list
 		const maxVisible = 8;
@@ -468,7 +562,7 @@ class SkillPaletteComponent {
 
 		if (this.filtered.length === 0) {
 			lines.push(emptyRow());
-			lines.push(row(dim(italic("No matching skills"))));
+			lines.push(row(hint(italic("No matching skills"))));
 			lines.push(emptyRow());
 		} else {
 			lines.push(emptyRow());
@@ -478,41 +572,41 @@ class SkillPaletteComponent {
 				const isQueued = skill.name === this.queuedSkillName;
 				
 				// Build the skill line
-				const prefix = isSelected ? cyan("▸") : dim("·");
-				const queuedBadge = isQueued ? ` ${green("●")}` : "";
-				const nameStr = isSelected ? bold(cyan(skill.name)) : skill.name;
+				const prefix = isSelected ? selected("▸") : border("·");
+				const queuedBadge = isQueued ? ` ${queued("●")}` : "";
+				const nameStr = isSelected ? bold(selectedText(skill.name)) : skill.name;
 				const maxDescLen = Math.max(0, innerW - visLen(skill.name) - 12);
-				const descStr = maxDescLen > 3 ? dim(truncate(skill.description, maxDescLen)) : "";
+				const descStr = maxDescLen > 3 ? description(truncate(skill.description, maxDescLen)) : "";
 				
-				const separator = descStr ? `  ${dim("—")}  ` : "";
+				const separator = descStr ? `  ${border("—")}  ` : "";
 				const skillLine = `${prefix} ${nameStr}${queuedBadge}${separator}${descStr}`;
 				lines.push(row(skillLine));
 			}
 			lines.push(emptyRow());
 
-			// Scroll position indicator
+			// Scroll position indicator - rainbow dots
 			if (this.filtered.length > maxVisible) {
-				const progress = Math.round(((this.selected + 1) / this.filtered.length) * 10);
-				const progressBar = "●".repeat(progress) + "○".repeat(10 - progress);
+				const prog = Math.round(((this.selected + 1) / this.filtered.length) * 10);
+				const progressBar = rainbowProgress(prog, 10);
 				const countStr = `${this.selected + 1}/${this.filtered.length}`;
-				lines.push(row(dim(`${progressBar}  ${countStr}`)));
+				lines.push(row(`${progressBar}  ${hint(countStr)}`));
 				lines.push(emptyRow());
 			}
 		}
 
 		// Divider
-		lines.push(dim("├" + "─".repeat(innerW) + "┤"));
+		lines.push(border("├" + "─".repeat(innerW) + "┤"));
 
 		lines.push(emptyRow());
 
 		// Footer hints - minimal and elegant
 		const hints = this.queuedSkillName 
-			? `${italic("↑↓")} navigate  ${italic("enter")} select${dim("/")}unqueue  ${italic("esc")} cancel`
+			? `${italic("↑↓")} navigate  ${italic("enter")} select${hint("/")}unqueue  ${italic("esc")} cancel`
 			: `${italic("↑↓")} navigate  ${italic("enter")} select  ${italic("esc")} cancel`;
-		lines.push(row(dim(hints)));
+		lines.push(row(hint(hints)));
 
 		// Bottom border
-		lines.push(dim(`╰${"─".repeat(innerW)}╯`));
+		lines.push(border(`╰${"─".repeat(innerW)}╯`));
 
 		return lines;
 	}
@@ -532,6 +626,55 @@ class SkillPaletteComponent {
 }
 
 export default function skillPaletteExtension(pi: ExtensionAPI): void {
+	// Register custom renderer for skill-context messages
+	pi.registerMessageRenderer("skill-context", (message, options, theme) => {
+		// Extract skill name and content (handle both string and array content)
+		const rawContent = typeof message.content === "string"
+			? message.content
+			: Array.isArray(message.content)
+				? message.content.map((c: { type: string; text?: string }) => c.type === "text" ? c.text || "" : "").join("")
+				: "";
+		const nameMatch = rawContent.match(/<skill name="([^"]+)">/);
+		const skillName = nameMatch?.[1] || "Unknown Skill";
+		
+		// Extract skill content (between <skill> tags)
+		const contentMatch = rawContent.match(/<skill[^>]*>\n?([\s\S]*?)\n?<\/skill>/);
+		const skillContent = contentMatch?.[1]?.trim() || rawContent;
+		
+		const container = new Container();
+		
+		// Header with file icon and skill name (like read tool)
+		const header = new Text(
+			theme.fg("accent", "◆ ") + 
+			theme.fg("customMessageLabel", theme.bold("Skill: ")) + 
+			theme.fg("accent", skillName),
+			1, 0
+		);
+		container.addChild(header);
+		
+		// Content preview (collapsible like read tool)
+		const lines = skillContent.split("\n");
+		const PREVIEW_LINES = 8;
+		const isLong = lines.length > PREVIEW_LINES;
+		const showLines = options.expanded ? lines : lines.slice(0, PREVIEW_LINES);
+		
+		// Add content lines with dim styling
+		for (const line of showLines) {
+			container.addChild(new Text(theme.fg("dim", line), 1, 0));
+		}
+		
+		// Show truncation indicator if collapsed and content is long
+		if (!options.expanded && isLong) {
+			const hiddenCount = lines.length - PREVIEW_LINES;
+			container.addChild(new Text(
+				theme.fg("muted", `... ${hiddenCount} more lines (click to expand)`),
+				1, 0
+			));
+		}
+		
+		return container;
+	});
+
 	// Register the /skill command
 	pi.registerCommand("skill", {
 		description: "Open skill palette to select a skill for the next message",
@@ -562,7 +705,11 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 			} else if (result.action === "unqueue" && result.skill) {
 				// Show confirmation dialog
 				const confirmed = await ctx.ui.custom<boolean>(
-					(_tui, _theme, _keybindings, done) => new ConfirmDialog(result.skill!.name, done),
+					(tui, _theme, _keybindings, done) => {
+						const dialog = new ConfirmDialog(result.skill!.name, done);
+						dialog.setRequestRender(() => tui.requestRender());
+						return dialog;
+					},
 					{ overlay: true }
 				);
 
@@ -585,9 +732,9 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 		const skill = state.queuedSkill;
 		state.queuedSkill = null;
 
-		// Clear the visual indicators
-		ctx.ui.setStatus("skill", undefined);
-		ctx.ui.setWidget("skill", undefined);
+		// Clear the visual indicators (use optional chaining for non-UI contexts)
+		ctx.ui?.setStatus("skill", undefined);
+		ctx.ui?.setWidget("skill", undefined);
 
 		try {
 			const skillContent = getSkillContent(skill);
@@ -596,12 +743,12 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 				message: {
 					customType: "skill-context",
 					content: `<skill name="${skill.name}">\n${skillContent}\n</skill>`,
-					display: false,
+					display: true,  // Show the skill injection in chat
 				},
 			};
 		} catch {
-			ctx.ui.setWidget("skill", undefined);
-			ctx.ui.notify(`Failed to load skill: ${skill.name}`, "warning");
+			ctx.ui?.setWidget("skill", undefined);
+			ctx.ui?.notify(`Failed to load skill: ${skill.name}`, "warning");
 			return {};
 		}
 	});

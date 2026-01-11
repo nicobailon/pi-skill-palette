@@ -123,16 +123,44 @@ The actual skill instructions go here...
 - Color-coded buttons: red Remove, green Keep
 - Press `Y`/`N` for quick selection
 
+## Theming
+
+Customize colors by creating `theme.json` in the extension directory. Copy `theme.example.json` as a starting point:
+
+```bash
+cp theme.example.json theme.json
+```
+
+Theme values are ANSI SGR codes:
+- Simple: `"36"` (cyan), `"32"` (green), `"2"` (dim)
+- Compound: `"2;3"` (dim + italic)
+- 24-bit: `"38;2;215;135;175"` (RGB pink)
+
+| Property | Description |
+|----------|-------------|
+| `border` | Box borders |
+| `title` | Title text |
+| `selected` | Selection indicator |
+| `selectedText` | Selected item text |
+| `queued` | Queued badge |
+| `searchIcon` | Search icon |
+| `placeholder` | Placeholder text |
+| `description` | Skill descriptions |
+| `hint` | Footer hints |
+| `confirm` | Confirm button |
+| `cancel` | Cancel button |
+
 ## Dependencies
 
-- `@mariozechner/pi-tui` — For `matchesKey` keyboard matching
+- `@mariozechner/pi-tui` — For `matchesKey`, `Container`, `Text`
 
 ## Technical Notes
 
 - Skills are deduplicated by name (first occurrence wins)
 - Symlinks are followed when scanning skill directories
 - Skill content is sent via the `before_agent_start` extension event
-- The skill message uses `display: false` to avoid cluttering the chat UI
+- The skill message uses `display: true` to show injected content in chat
+- Theme is loaded once at startup (restart pi to reload)
 
 ## License
 
