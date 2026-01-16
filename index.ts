@@ -108,54 +108,126 @@ function rainbowProgress(filled: number, total: number): string {
 // Load theme once at startup
 const paletteTheme = loadTheme();
 
+type SkillFormat = "recursive" | "claude";
+
+interface SkillDirConfig {
+	dir: string;
+	format: SkillFormat;
+}
+
 /**
- * Load skills from known directories
+ * Scan a directory for skills based on the format
+ * - "recursive": scans directories recursively looking for SKILL.md files
+ * - "claude": only scans one level deep (directories directly containing SKILL.md)
  */
-function loadSkills(): Skill[] {
-	const skillsByName = new Map<string, Skill>();
-	const skillDirs = [
-		path.join(os.homedir(), ".pi", "agent", "skills"),
-		path.join(os.homedir(), ".pi", "skills"),
-		path.join(process.cwd(), ".pi", "skills"),
-	];
+function scanSkillDir(
+	dir: string,
+	format: SkillFormat,
+	skillsByName: Map<string, Skill>,
+	visitedDirs?: Set<string>
+): void {
+	if (!fs.existsSync(dir)) return;
 
-	for (const skillDir of skillDirs) {
-		if (!fs.existsSync(skillDir)) continue;
+	// Track visited directories by realpath to detect symlink cycles
+	const visited = visitedDirs ?? new Set<string>();
+	let realDir: string;
+	try {
+		realDir = fs.realpathSync(dir);
+	} catch {
+		realDir = dir;
+	}
+	if (visited.has(realDir)) return;
+	visited.add(realDir);
 
-		try {
-			const entries = fs.readdirSync(skillDir);
-			for (const entryName of entries) {
-				const entryPath = path.join(skillDir, entryName);
-				
-				// Check if it's a directory (follows symlinks)
+	try {
+		const entries = fs.readdirSync(dir, { withFileTypes: true });
+		for (const entry of entries) {
+			if (entry.name.startsWith(".")) continue;
+			if (entry.name === "node_modules") continue;
+
+			const entryPath = path.join(dir, entry.name);
+
+			// Handle symlinks
+			let isDirectory = entry.isDirectory();
+			let isFile = entry.isFile();
+			if (entry.isSymbolicLink()) {
 				try {
-					const stat = fs.statSync(entryPath);
-					if (!stat.isDirectory()) continue;
+					const stats = fs.statSync(entryPath);
+					isDirectory = stats.isDirectory();
+					isFile = stats.isFile();
 				} catch {
-					continue;
+					continue; // Broken symlink
 				}
+			}
+
+			if (format === "recursive") {
+				// Recursive format: scan directories, look for SKILL.md files anywhere
+				if (isDirectory) {
+					scanSkillDir(entryPath, format, skillsByName, visited);
+				} else if (isFile && entry.name === "SKILL.md") {
+					loadSkillFromFile(entryPath, skillsByName);
+				}
+			} else if (format === "claude") {
+				// Claude format: only one level deep, each directory must contain SKILL.md
+				if (!isDirectory) continue;
 
 				const skillFile = path.join(entryPath, "SKILL.md");
 				if (!fs.existsSync(skillFile)) continue;
 
-				try {
-					const content = fs.readFileSync(skillFile, "utf-8");
-					const { name, description } = parseFrontmatter(content, entryName);
-					if (description && !skillsByName.has(name)) {
-						// First occurrence wins (user > project scope)
-						skillsByName.set(name, {
-							name,
-							description,
-							filePath: skillFile,
-						});
-					}
-				} catch {
-					// Skip invalid skill files
-				}
+				loadSkillFromFile(skillFile, skillsByName);
 			}
-		} catch {
-			// Skip inaccessible directories
 		}
+	} catch {
+		// Skip inaccessible directories
+	}
+}
+
+/**
+ * Load a single skill from a SKILL.md file
+ */
+function loadSkillFromFile(filePath: string, skillsByName: Map<string, Skill>): void {
+	try {
+		const content = fs.readFileSync(filePath, "utf-8");
+		const skillDir = path.dirname(filePath);
+		const parentDirName = path.basename(skillDir);
+		const { name, description } = parseFrontmatter(content, parentDirName);
+		
+		if (description && !skillsByName.has(name)) {
+			// First occurrence wins (earlier sources take precedence)
+			skillsByName.set(name, {
+				name,
+				description,
+				filePath,
+			});
+		}
+	} catch {
+		// Skip invalid skill files
+	}
+}
+
+/**
+ * Load skills from known directories
+ * Matches pi's skill loading order:
+ * 1. ~/.codex/skills (recursive)
+ * 2. ~/.claude/skills (claude format - one level)
+ * 3. ${cwd}/.claude/skills (claude format - one level)
+ * 4. ~/.pi/agent/skills (recursive)
+ * 5. ${cwd}/.pi/skills (recursive)
+ */
+function loadSkills(): Skill[] {
+	const skillsByName = new Map<string, Skill>();
+	
+	const skillDirs: SkillDirConfig[] = [
+		{ dir: path.join(os.homedir(), ".codex", "skills"), format: "recursive" },
+		{ dir: path.join(os.homedir(), ".claude", "skills"), format: "claude" },
+		{ dir: path.join(process.cwd(), ".claude", "skills"), format: "claude" },
+		{ dir: path.join(os.homedir(), ".pi", "agent", "skills"), format: "recursive" },
+		{ dir: path.join(os.homedir(), ".pi", "skills"), format: "recursive" },
+		{ dir: path.join(process.cwd(), ".pi", "skills"), format: "recursive" },
+	];
+
+	for (const { dir, format } of skillDirs) {
+		scanSkillDir(dir, format, skillsByName);
 	}
 
 	// Sort alphabetically by name

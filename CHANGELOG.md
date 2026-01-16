@@ -16,6 +16,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Import package** — Changed from `@anthropic-ai/claude-code` to `@mariozechner/pi-coding-agent`
 - **Countdown timer** — Unqueue dialog timer now actually updates visually
 - **Array content handling** — Message renderer handles both string and TextContent[] formats
+- **Missing skill directories** — Now scans all directories that pi scans:
+  - `~/.codex/skills` (recursive)
+  - `~/.claude/skills` (claude format - one level)
+  - `${cwd}/.claude/skills` (claude format - one level)
+  - `~/.pi/agent/skills` (recursive)
+  - `~/.pi/skills` (recursive)
+  - `${cwd}/.pi/skills` (recursive)
+- **Claude format support** — Claude skill directories (one level deep) now handled differently from recursive directories
 
 ### Changed
 - Skill injection now sets `display: true` to show content in chat
