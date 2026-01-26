@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- Added `pi` manifest to package.json for pi v0.50.0 package system compliance
+- Added `pi-package` keyword for npm discoverability
+
 ### Added
 - **Theming system** — Load custom colors from `theme.json` with fallback to defaults
 - **Rainbow progress dots** — Spaced out dots with rainbow gradient (matching powerline-footer)
