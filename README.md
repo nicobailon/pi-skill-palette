@@ -18,15 +18,11 @@ Instead of relying on the agent to automatically invoke skills based on task con
 
 ## Installation
 
-Clone or copy the `pi-skill-palette` folder to your extensions directory:
+```bash
+pi install npm:pi-skill-palette
+```
 
-```
-~/.pi/agent/extensions/pi-skill-palette/
-├── index.ts
-├── package.json
-├── README.md
-└── CHANGELOG.md
-```
+Restart pi to load the extension.
 
 ## Usage
 
