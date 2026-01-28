@@ -1,6 +1,6 @@
 {
 	"name": "pi-skill-palette",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"description": "VS Code-style command palette for selecting and applying skills in pi",
 	"main": "index.ts",
 	"keywords": ["pi-package"],

@@ -6,9 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-01-27
+
 ### Changed
 - Added `pi` manifest to package.json for pi v0.50.0 package system compliance
 - Added `pi-package` keyword for npm discoverability
+- Skill injection now sets `display: true` to show content in chat
 
 ### Added
 - **Theming system** — Load custom colors from `theme.json` with fallback to defaults
@@ -28,9 +31,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - `~/.pi/skills` (recursive)
   - `${cwd}/.pi/skills` (recursive)
 - **Claude format support** — Claude skill directories (one level deep) now handled differently from recursive directories
-
-### Changed
-- Skill injection now sets `display: true` to show content in chat
 
 ### Removed
 - Unused `progress` theme property (progress dots use rainbow colors directly)
