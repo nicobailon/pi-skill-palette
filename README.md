@@ -46,9 +46,12 @@ Restart pi to load the extension.
 
 Skills are loaded from these directories (in order):
 
-1. `~/.pi/agent/skills/` — User skills
-2. `~/.pi/skills/` — Legacy user skills  
-3. `.pi/skills/` — Project-specific skills
+1. `~/.codex/skills/` — Codex user skills (recursive)
+2. `~/.claude/skills/` — Claude user skills (one level deep)
+3. `.claude/skills/` — Claude project skills (one level deep)
+4. `~/.pi/agent/skills/` — Pi user skills (recursive)
+5. `~/.pi/skills/` — Legacy user skills (recursive)
+6. `.pi/skills/` — Pi project-specific skills (recursive)
 
 Each skill must be in its own directory with a `SKILL.md` file containing YAML frontmatter:
 
