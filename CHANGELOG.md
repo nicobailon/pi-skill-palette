@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-01-29
+
+### Fixed
+- **Overlay rendering** — Use pi-tui's `truncateToWidth` and `visibleWidth` instead of custom regex-based width calculation, fixing right border not rendering
+- **Overlay positioning** — Use `overlayOptions` with `anchor: "center"` for proper centering
+- **Cursor placement** — Cursor now appears before placeholder text when search is empty, not after
+
+### Changed
+- Replaced all custom width/pad/truncate helpers with pi-tui builtins (`truncateToWidth`, `visibleWidth`)
+- ConfirmDialog `center` function now truncates before centering to prevent overflow with long skill names
+- Polished README with banner image and restructured to follow pi extension conventions
+
+### Removed
+- Dead code: unused `readonly width` properties, `pad` and `truncate` helper functions
+
 ## [1.1.0] - 2026-01-27
 
 ### Changed

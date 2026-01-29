@@ -10,7 +10,7 @@ A command palette for [Pi coding agent](https://github.com/badlogic/pi) that let
 /skill
 ```
 
-<img width="1261" alt="Skill Palette" src="https://github.com/user-attachments/assets/a02602be-4b7b-424a-bec0-a3aeba92f09d" />
+<img width="1255" height="672" alt="Image" src="https://github.com/user-attachments/assets/ebe7fc2e-7289-4c9d-9c3f-71ae6bafcf35" />
 
 ## Why
 
@@ -32,8 +32,6 @@ Restart pi to load the extension.
 4. Send your message - the skill context is automatically included
 
 The selected skill appears in the footer and a widget until consumed. Re-select a queued skill to unqueue it (with confirmation).
-
-<img width="1263" alt="Unqueue Confirmation" src="https://github.com/user-attachments/assets/8ad93c58-e6e9-4c71-a0b9-41af9efe9311" />
 
 ## Keyboard Shortcuts
 

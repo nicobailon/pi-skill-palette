@@ -11,7 +11,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { matchesKey, Container, Text } from "@mariozechner/pi-tui";
+import { matchesKey, Container, Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -330,7 +330,6 @@ function filterSkills(skills: Skill[], query: string): Skill[] {
  * Confirmation Dialog Component
  */
 class ConfirmDialog {
-	readonly width = 44;
 	private selected = 1; // 0 = Remove, 1 = Keep (default to Keep)
 	private timeoutId: ReturnType<typeof setTimeout> | null = null;
 	private remainingSeconds = 30;
@@ -396,8 +395,7 @@ class ConfirmDialog {
 	}
 
 	render(width: number): string[] {
-		const w = Math.min(this.width, width - 4);
-		const innerW = w - 2;
+		const innerW = width - 2;
 		const lines: string[] = [];
 
 		// Theme-aware color helpers
@@ -412,19 +410,16 @@ class ConfirmDialog {
 		const italic = (s: string) => `\x1b[3m${s}\x1b[23m`;
 		const inverse = (s: string) => `\x1b[7m${s}\x1b[27m`;
 
-		const visLen = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "").length;
-
-		const pad = (s: string, len: number) => {
-			return s + " ".repeat(Math.max(0, len - visLen(s)));
-		};
+		const visLen = visibleWidth;
 
 		const center = (s: string, len: number) => {
-			const padding = Math.max(0, len - visLen(s));
+			const truncated = truncateToWidth(s, len, "…");
+			const padding = Math.max(0, len - visLen(truncated));
 			const left = Math.floor(padding / 2);
-			return " ".repeat(left) + s + " ".repeat(padding - left);
+			return " ".repeat(left) + truncated + " ".repeat(padding - left);
 		};
 
-		const row = (content: string) => border("│") + pad(" " + content, innerW) + border("│");
+		const row = (content: string) => border("│") + truncateToWidth(" " + content, innerW, "…", true) + border("│");
 		const centerRow = (content: string) => border("│") + center(content, innerW) + border("│");
 		const emptyRow = () => border("│") + " ".repeat(innerW) + border("│");
 
@@ -489,7 +484,6 @@ class ConfirmDialog {
  * Skill Palette Overlay Component
  */
 class SkillPaletteComponent {
-	readonly width = 70;
 	private allSkills: Skill[];
 	private filtered: Skill[];
 	private selected = 0;
@@ -575,8 +569,7 @@ class SkillPaletteComponent {
 	}
 
 	render(width: number): string[] {
-		const w = Math.min(this.width, width - 4);
-		const innerW = w - 2;
+		const innerW = width - 2;
 		const lines: string[] = [];
 
 		// Theme-aware color helpers
@@ -593,18 +586,9 @@ class SkillPaletteComponent {
 		const bold = (s: string) => `\x1b[1m${s}\x1b[22m`;
 		const italic = (s: string) => `\x1b[3m${s}\x1b[23m`;
 
-		const visLen = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "").length;
+		const visLen = visibleWidth;
 
-		const pad = (s: string, len: number) => {
-			return s + " ".repeat(Math.max(0, len - visLen(s)));
-		};
-
-		const truncate = (s: string, maxLen: number) => {
-			if (s.length <= maxLen) return s;
-			return s.slice(0, maxLen - 1) + "…";
-		};
-
-		const row = (content: string) => border("│") + pad(" " + content, innerW) + border("│");
+		const row = (content: string) => border("│") + truncateToWidth(" " + content, innerW, "…", true) + border("│");
 		const emptyRow = () => border("│") + " ".repeat(innerW) + border("│");
 
 		// Top border with title
@@ -619,8 +603,10 @@ class SkillPaletteComponent {
 		// Search input - clean underlined style
 		const cursor = selected("│");
 		const searchIconChar = searchIcon("◎");
-		const queryDisplay = this.query || placeholder(italic("type to filter..."));
-		lines.push(row(`${searchIconChar}  ${queryDisplay}${cursor}`));
+		const queryDisplay = this.query
+			? `${this.query}${cursor}`
+			: `${cursor}${placeholder(italic("type to filter..."))}`;
+		lines.push(row(`${searchIconChar}  ${queryDisplay}`));
 
 		lines.push(emptyRow());
 
@@ -648,7 +634,7 @@ class SkillPaletteComponent {
 				const queuedBadge = isQueued ? ` ${queued("●")}` : "";
 				const nameStr = isSelected ? bold(selectedText(skill.name)) : skill.name;
 				const maxDescLen = Math.max(0, innerW - visLen(skill.name) - 12);
-				const descStr = maxDescLen > 3 ? description(truncate(skill.description, maxDescLen)) : "";
+				const descStr = maxDescLen > 3 ? description(truncateToWidth(skill.description, maxDescLen, "…")) : "";
 				
 				const separator = descStr ? `  ${border("—")}  ` : "";
 				const skillLine = `${prefix} ${nameStr}${queuedBadge}${separator}${descStr}`;
@@ -766,7 +752,7 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 					state.queuedSkill,
 					(skill, action) => done({ skill, action })
 				),
-				{ overlay: true }
+				{ overlay: true, overlayOptions: { anchor: "center", width: 70 } }
 			);
 
 			if (result.action === "select" && result.skill) {
@@ -782,7 +768,7 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 						dialog.setRequestRender(() => tui.requestRender());
 						return dialog;
 					},
-					{ overlay: true }
+					{ overlay: true, overlayOptions: { anchor: "center", width: 44 } }
 				);
 
 				if (confirmed) {
