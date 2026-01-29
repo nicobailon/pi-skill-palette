@@ -1,22 +1,22 @@
-# pi-skill-palette
+<p>
+  <img src="banner.png" alt="pi-skill-palette" width="1100">
+</p>
 
-Trigger [pi](https://github.com/badlogic/pi) skills on demand with a VS Code/Amp-style command palette.
+# Pi Skill Palette
 
-Instead of relying on the agent to automatically invoke skills based on task context, this extension lets you explicitly select which skill to apply to your next message.
+A command palette for [Pi coding agent](https://github.com/badlogic/pi) that lets you explicitly select which skill to inject with your next message.
+
+```
+/skill
+```
 
 <img width="1261" alt="Skill Palette" src="https://github.com/user-attachments/assets/a02602be-4b7b-424a-bec0-a3aeba92f09d" />
 
-<img width="1263" alt="Unqueue Confirmation" src="https://github.com/user-attachments/assets/8ad93c58-e6e9-4c71-a0b9-41af9efe9311" />
+## Why
 
-## Features
+Agents don't always know when to read their skills. Instead of relying on automatic detection based on task context, this extension gives you direct control. Select a skill from the palette and it gets sent alongside your next message.
 
-- **Quick Access**: `/skill` command opens an elegant overlay
-- **Fuzzy Search**: Type to filter skills by name or description
-- **Visual Queue**: Selected skill shown in footer and widget until consumed
-- **Toggle Support**: Re-select a queued skill to unqueue it (with confirmation)
-- **Auto-Injection**: Skill content automatically sent with your next message
-
-## Installation
+## Install
 
 ```bash
 pi install npm:pi-skill-palette
@@ -24,15 +24,18 @@ pi install npm:pi-skill-palette
 
 Restart pi to load the extension.
 
-## Usage
+## Quick Start
 
-1. **Open palette**: Type `/skill` and press Enter
-2. **Search**: Start typing to fuzzy-filter skills
-3. **Navigate**: Use `↑`/`↓` arrow keys
-4. **Select**: Press `Enter` to queue a skill
-5. **Send message**: Your next message will include the skill context
+1. Type `/skill` and press Enter
+2. Start typing to fuzzy-filter skills
+3. Use `↑`/`↓` to navigate, `Enter` to select
+4. Send your message - the skill context is automatically included
 
-### Keyboard Shortcuts
+The selected skill appears in the footer and a widget until consumed. Re-select a queued skill to unqueue it (with confirmation).
+
+<img width="1263" alt="Unqueue Confirmation" src="https://github.com/user-attachments/assets/8ad93c58-e6e9-4c71-a0b9-41af9efe9311" />
+
+## Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
@@ -46,12 +49,12 @@ Restart pi to load the extension.
 
 Skills are loaded from these directories (in order):
 
-1. `~/.codex/skills/` — Codex user skills (recursive)
-2. `~/.claude/skills/` — Claude user skills (one level deep)
-3. `.claude/skills/` — Claude project skills (one level deep)
-4. `~/.pi/agent/skills/` — Pi user skills (recursive)
-5. `~/.pi/skills/` — Legacy user skills (recursive)
-6. `.pi/skills/` — Pi project-specific skills (recursive)
+1. `~/.codex/skills/` - Codex user skills (recursive)
+2. `~/.claude/skills/` - Claude user skills (one level deep)
+3. `.claude/skills/` - Claude project skills (one level deep)
+4. `~/.pi/agent/skills/` - Pi user skills (recursive)
+5. `~/.pi/skills/` - Legacy user skills (recursive)
+6. `.pi/skills/` - Pi project-specific skills (recursive)
 
 Each skill must be in its own directory with a `SKILL.md` file containing YAML frontmatter:
 
@@ -66,62 +69,6 @@ description: Brief description of what this skill does
 The actual skill instructions go here...
 ```
 
-## How It Works
-
-1. When you select a skill, it's queued in memory
-2. Visual indicators show the queued skill (footer status + widget)
-3. On your next message, the skill content is sent as a custom message alongside your prompt
-4. The agent sees both your message and the skill context
-
-## UI Components
-
-### Skill Palette
-
-```
-╭──────────────────────── Skills ────────────────────────╮
-│                                                        │
-│  ◎  type to filter...│                                 │
-│                                                        │
-├────────────────────────────────────────────────────────┤
-│                                                        │
-│  · clean-copy  —  Reimplement a branch with clean...   │
-│  ▸ code-mode ●  —  Batch multiple tool operations...   │
-│  · planning  —  Create implementation plans...         │
-│                                                        │
-│  ●●●○○○○○○○  3/11                                      │
-│                                                        │
-├────────────────────────────────────────────────────────┤
-│                                                        │
-│  ↑↓ navigate  enter select/unqueue  esc cancel         │
-╰────────────────────────────────────────────────────────╯
-```
-
-- `▸` — Selected item
-- `·` — Unselected item
-- `●` — Currently queued skill
-- Progress dots show scroll position
-
-### Unqueue Confirmation
-
-```
-╭─────────────── Unqueue Skill ───────────────╮
-│                                             │
-│              ◆ planning                     │
-│                                             │
-├─────────────────────────────────────────────┤
-│                                             │
-│          Remove      Keep                   │
-│                                             │
-│           ●●●●●●●●○○  28s                   │
-│                                             │
-│     tab switch  enter confirm  esc cancel   │
-╰─────────────────────────────────────────────╯
-```
-
-- 30-second auto-cancel timeout (keeps skill queued)
-- Color-coded buttons: red Remove, green Keep
-- Press `Y`/`N` for quick selection
-
 ## Theming
 
 Customize colors by creating `theme.json` in the extension directory. Copy `theme.example.json` as a starting point:
@@ -130,10 +77,7 @@ Customize colors by creating `theme.json` in the extension directory. Copy `them
 cp theme.example.json theme.json
 ```
 
-Theme values are ANSI SGR codes:
-- Simple: `"36"` (cyan), `"32"` (green), `"2"` (dim)
-- Compound: `"2;3"` (dim + italic)
-- 24-bit: `"38;2;215;135;175"` (RGB pink)
+Theme values are ANSI SGR codes (`"36"` for cyan, `"2;3"` for dim+italic, `"38;2;215;135;175"` for RGB).
 
 | Property | Description |
 |----------|-------------|
@@ -149,18 +93,12 @@ Theme values are ANSI SGR codes:
 | `confirm` | Confirm button |
 | `cancel` | Cancel button |
 
-## Dependencies
+## How It Works
 
-- `@mariozechner/pi-tui` — For `matchesKey`, `Container`, `Text`
+When you select a skill, it's queued in memory with visual indicators in the footer and widget. On your next message, the skill content is sent via the `before_agent_start` extension event as a custom message alongside your prompt. Skills are deduplicated by name (first occurrence wins) and symlinks are followed when scanning directories.
 
-## Technical Notes
+## Limitations
 
-- Skills are deduplicated by name (first occurrence wins)
-- Symlinks are followed when scanning skill directories
-- Skill content is sent via the `before_agent_start` extension event
-- The skill message uses `display: true` to show injected content in chat
-- Theme is loaded once at startup (restart pi to reload)
-
-## License
-
-MIT
+- Skills are loaded once at startup (restart pi to pick up new skills)
+- Theme changes require a restart
+- First occurrence wins when skills share the same name across directories
