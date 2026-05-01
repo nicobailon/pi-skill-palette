@@ -205,18 +205,9 @@ function loadSkillFromFile(filePath: string, skillsByName: Map<string, Skill>): 
 	}
 }
 
-/**
- * Load skills from known directories
- * Matches pi's skill loading order:
- * 1. ~/.codex/skills (recursive)
- * 2. ~/.claude/skills (claude format - one level)
- * 3. ${cwd}/.claude/skills (claude format - one level)
- * 4. ~/.pi/agent/skills (recursive)
- * 5. ${cwd}/.pi/skills (recursive)
- */
 function loadSkills(): Skill[] {
 	const skillsByName = new Map<string, Skill>();
-	
+
 	const skillDirs: SkillDirConfig[] = [
 		{ dir: path.join(os.homedir(), ".codex", "skills"), format: "recursive" },
 		{ dir: path.join(os.homedir(), ".claude", "skills"), format: "claude" },
@@ -224,13 +215,32 @@ function loadSkills(): Skill[] {
 		{ dir: path.join(os.homedir(), ".pi", "agent", "skills"), format: "recursive" },
 		{ dir: path.join(os.homedir(), ".pi", "skills"), format: "recursive" },
 		{ dir: path.join(process.cwd(), ".pi", "skills"), format: "recursive" },
+		{ dir: path.join(os.homedir(), ".agents", "skills"), format: "recursive" },
+		{ dir: path.join(process.cwd(), ".agents", "skills"), format: "recursive" },
 	];
 
 	for (const { dir, format } of skillDirs) {
 		scanSkillDir(dir, format, skillsByName);
 	}
 
-	// Sort alphabetically by name
+	// Walk ancestor directories for .agents/skills and .pi/skills (up to git root or fs root)
+	let currentDir = process.cwd();
+	const visitedAncestors = new Set<string>();
+	while (currentDir !== path.dirname(currentDir)) {
+		if (visitedAncestors.has(currentDir)) break;
+		visitedAncestors.add(currentDir);
+
+		const isGitRoot = fs.existsSync(path.join(currentDir, ".git"));
+
+		const agentsSkills = path.join(currentDir, ".agents", "skills");
+		const piSkills = path.join(currentDir, ".pi", "skills");
+		scanSkillDir(agentsSkills, "recursive", skillsByName);
+		scanSkillDir(piSkills, "recursive", skillsByName);
+
+		if (isGitRoot) break;
+		currentDir = path.dirname(currentDir);
+	}
+
 	return Array.from(skillsByName.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
