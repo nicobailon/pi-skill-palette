@@ -212,7 +212,9 @@ function loadSkillFromFile(filePath: string, skillsByName: Map<string, Skill>): 
  * 2. ~/.claude/skills (claude format - one level)
  * 3. ${cwd}/.claude/skills (claude format - one level)
  * 4. ~/.pi/agent/skills (recursive)
- * 5. ${cwd}/.pi/skills (recursive)
+ * 5. ~/.agents/skills (recursive - shared agent harness location)
+ * 6. ${cwd}/.agents/skills (recursive - project-local agent harness location)
+ * 7. ${cwd}/.pi/skills (recursive)
  */
 function loadSkills(): Skill[] {
 	const skillsByName = new Map<string, Skill>();
@@ -222,6 +224,8 @@ function loadSkills(): Skill[] {
 		{ dir: path.join(os.homedir(), ".claude", "skills"), format: "claude" },
 		{ dir: path.join(process.cwd(), ".claude", "skills"), format: "claude" },
 		{ dir: path.join(os.homedir(), ".pi", "agent", "skills"), format: "recursive" },
+		{ dir: path.join(os.homedir(), ".agents", "skills"), format: "recursive" },
+		{ dir: path.join(process.cwd(), ".agents", "skills"), format: "recursive" },
 		{ dir: path.join(os.homedir(), ".pi", "skills"), format: "recursive" },
 		{ dir: path.join(process.cwd(), ".pi", "skills"), format: "recursive" },
 	];

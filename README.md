@@ -93,7 +93,22 @@ Theme values are ANSI SGR codes (`"36"` for cyan, `"2;3"` for dim+italic, `"38;2
 
 ## How It Works
 
-When you select a skill, it's queued in memory with visual indicators in the footer and widget. On your next message, the skill content is sent via the `before_agent_start` extension event as a custom message alongside your prompt. Skills are deduplicated by name (first occurrence wins) and symlinks are followed when scanning directories.
+When you select a skill, it's queued in memory with visual indicators in the footer and widget. On your next message, the skill content is sent via the `before_agent_start` extension event as a custom message alongside your prompt.
+
+## Skill Discovery
+
+The palette discovers skills from the common Pi, Codex, Claude, and shared agent-harness locations:
+
+- `~/.codex/skills` recursively
+- `~/.claude/skills` one level deep
+- `./.claude/skills` one level deep
+- `~/.pi/agent/skills` recursively
+- `~/.agents/skills` recursively
+- `./.agents/skills` recursively
+- `~/.pi/skills` recursively
+- `./.pi/skills` recursively
+
+Skills are deduplicated by name (first occurrence wins) and symlinks are followed when scanning directories.
 
 ## Limitations
 
