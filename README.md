@@ -4,7 +4,7 @@
 
 # Pi Skill Palette
 
-A command palette for [Pi coding agent](https://github.com/badlogic/pi) that lets you explicitly select which skill to inject with your next message.
+A command palette for [Pi coding agent](https://github.com/earendil-works/pi) that lets you explicitly select which skill to inject with your next message.
 
 ```
 /skill
@@ -45,16 +45,9 @@ The selected skill appears in the footer and a widget until consumed. Re-select 
 
 ## Skill Locations
 
-Skills are loaded from these directories (in order):
+The palette shows the skills already loaded by pi for the current session, including user skills, trusted project skills, configured skill paths, and installed package skills. This keeps the palette aligned with pi's own discovery, precedence, trust, and deduplication rules.
 
-1. `~/.codex/skills/` - Codex user skills (recursive)
-2. `~/.claude/skills/` - Claude user skills (one level deep)
-3. `.claude/skills/` - Claude project skills (one level deep)
-4. `~/.pi/agent/skills/` - Pi user skills (recursive)
-5. `~/.pi/skills/` - Legacy user skills (recursive)
-6. `.pi/skills/` - Pi project-specific skills (recursive)
-
-Each skill must be in its own directory with a `SKILL.md` file containing YAML frontmatter:
+Each skill must provide YAML frontmatter:
 
 ```markdown
 ---
@@ -93,10 +86,9 @@ Theme values are ANSI SGR codes (`"36"` for cyan, `"2;3"` for dim+italic, `"38;2
 
 ## How It Works
 
-When you select a skill, it's queued in memory with visual indicators in the footer and widget. On your next message, the skill content is sent via the `before_agent_start` extension event as a custom message alongside your prompt. Skills are deduplicated by name (first occurrence wins) and symlinks are followed when scanning directories.
+When you select a skill, it's queued in memory with visual indicators in the footer and widget. On your next message, the skill content is sent via the `before_agent_start` extension event as a custom message alongside your prompt. The palette uses pi's loaded skill list, so skill precedence, trust checks, package resources, configured paths, and deduplication are handled by pi.
 
 ## Limitations
 
-- Skills are loaded once at startup (restart pi to pick up new skills)
+- Use `/reload` or restart pi to pick up newly added skills
 - Theme changes require a restart
-- First occurrence wins when skills share the same name across directories

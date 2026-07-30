@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- Use pi's loaded skill list instead of duplicating skill directory discovery, preserving current pi trust, package, settings, and deduplication behavior.
+- Updated extension imports and package peer dependencies for the `@earendil-works` pi packages.
+
+### Fixed
+- Guard `/skill` so the overlay only opens in interactive TUI mode.
+- Respect pi's configured custom-message output padding in the skill preview renderer.
+
 ## [1.2.0] - 2026-01-29
 
 ### Fixed
