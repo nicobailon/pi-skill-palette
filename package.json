@@ -1,6 +1,6 @@
 {
 	"name": "pi-skill-palette",
-	"version": "1.2.0",
+	"version": "2.0.0",
 	"description": "VS Code-style command palette for selecting and applying skills in pi",
 	"main": "index.ts",
 	"keywords": ["pi-package"],
@@ -11,8 +11,8 @@
 	"author": "nicobailon",
 	"license": "MIT",
 	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": "*",
-		"@earendil-works/pi-tui": "*"
+		"@earendil-works/pi-coding-agent": ">=0.83.0",
+		"@earendil-works/pi-tui": ">=0.83.0"
 	},
 	"pi": {
 		"extensions": ["./index.ts"]

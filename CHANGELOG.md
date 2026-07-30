@@ -6,10 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+- **Breaking:** the palette no longer scans `~/.codex/skills`, `~/.claude/skills`, or `<cwd>/.claude/skills`. Skill discovery is now entirely pi's, and pi does not read those directories, so skills kept only there will stop appearing in `/skill`. To restore them, either symlink them into a directory pi does read (`~/.pi/agent/skills`, `<cwd>/.pi/skills`, `~/.agents/skills`, or `<cwd>/.agents/skills` — symlinks are followed), or add their paths to pi's configured skill paths.
+
 ### Changed
+- **Breaking:** requires pi 0.83.0 or newer. The extension now reads `getSystemPromptOptions().skills` and each skill's `baseDir`, and honors the renderer's `outputPad`; peer dependency ranges were tightened from `*` accordingly.
 - Performance: cache the sorted skill index between palette openings, pre-normalize search text and narrow fuzzy matches incrementally while typing, and render skill previews as a single cached text block. Repeated palette opens and re-renders of large skill content are now near-instant, with byte-identical rendered output.
 - Use pi's loaded skill list instead of duplicating skill directory discovery, preserving current pi trust, package, settings, and deduplication behavior.
-- Updated extension imports and package peer dependencies for the `@earendil-works` pi packages.
+- Updated extension imports for the `@earendil-works` pi packages.
 
 ### Fixed
 - Relative references inside a skill (for example `./assets`) now resolve against the skill's own directory instead of the current working directory. Queued skills are injected with `location` and a "References are relative to" line, matching pi's own skill expansion ([#3](https://github.com/nicobailon/pi-skill-palette/issues/3), reported by @hetzge).
