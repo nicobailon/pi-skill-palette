@@ -20,6 +20,7 @@ interface Skill {
 	name: string;
 	description: string;
 	filePath: string;
+	baseDir: string;
 	searchName: string;
 	searchDescription: string;
 	sortIndex: number;
@@ -126,6 +127,7 @@ function getLoadedSkills(ctx: ExtensionCommandContext): Skill[] {
 			name: skill.name,
 			description: skill.description,
 			filePath: skill.filePath,
+			baseDir: skill.baseDir,
 		}))
 		.sort((a, b) => a.name.localeCompare(b.name))
 		.map((skill, sortIndex) => ({
@@ -565,7 +567,7 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 			: Array.isArray(message.content)
 				? message.content.map((c: { type: string; text?: string }) => c.type === "text" ? c.text || "" : "").join("")
 				: "";
-		const nameMatch = rawContent.match(/<skill name="([^"]+)">/);
+		const nameMatch = rawContent.match(/<skill name="([^"]+)"/);
 		const skillName = nameMatch?.[1] || "Unknown Skill";
 		
 		// Extract skill content (between <skill> tags)
@@ -663,7 +665,9 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 			return {
 				message: {
 					customType: "skill-context",
-					content: `<skill name="${skill.name}">\n${skillContent}\n</skill>`,
+					// Mirrors pi's own skill expansion so relative references inside a skill
+					// resolve against the skill directory rather than the cwd.
+					content: `<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${skillContent}\n</skill>`,
 					display: true,  // Show the skill injection in chat
 				},
 			};
