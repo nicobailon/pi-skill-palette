@@ -1,2 +1,6 @@
 # Local theme customization
 theme.json
+
+# Local development state
+package-lock.json
+progress.md

@@ -10,8 +10,8 @@
  * https://github.com/nicobailon/pi-skill-palette
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { matchesKey, Container, Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { matchesKey, Container, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -108,161 +108,14 @@ function rainbowProgress(filled: number, total: number): string {
 // Load theme once at startup
 const paletteTheme = loadTheme();
 
-type SkillFormat = "recursive" | "claude";
-
-interface SkillDirConfig {
-	dir: string;
-	format: SkillFormat;
-}
-
-/**
- * Scan a directory for skills based on the format
- * - "recursive": scans directories recursively looking for SKILL.md files
- * - "claude": only scans one level deep (directories directly containing SKILL.md)
- */
-function scanSkillDir(
-	dir: string,
-	format: SkillFormat,
-	skillsByName: Map<string, Skill>,
-	visitedDirs?: Set<string>
-): void {
-	if (!fs.existsSync(dir)) return;
-
-	// Track visited directories by realpath to detect symlink cycles
-	const visited = visitedDirs ?? new Set<string>();
-	let realDir: string;
-	try {
-		realDir = fs.realpathSync(dir);
-	} catch {
-		realDir = dir;
-	}
-	if (visited.has(realDir)) return;
-	visited.add(realDir);
-
-	try {
-		const entries = fs.readdirSync(dir, { withFileTypes: true });
-		for (const entry of entries) {
-			if (entry.name.startsWith(".")) continue;
-			if (entry.name === "node_modules") continue;
-
-			const entryPath = path.join(dir, entry.name);
-
-			// Handle symlinks
-			let isDirectory = entry.isDirectory();
-			let isFile = entry.isFile();
-			if (entry.isSymbolicLink()) {
-				try {
-					const stats = fs.statSync(entryPath);
-					isDirectory = stats.isDirectory();
-					isFile = stats.isFile();
-				} catch {
-					continue; // Broken symlink
-				}
-			}
-
-			if (format === "recursive") {
-				// Recursive format: scan directories, look for SKILL.md files anywhere
-				if (isDirectory) {
-					scanSkillDir(entryPath, format, skillsByName, visited);
-				} else if (isFile && entry.name === "SKILL.md") {
-					loadSkillFromFile(entryPath, skillsByName);
-				}
-			} else if (format === "claude") {
-				// Claude format: only one level deep, each directory must contain SKILL.md
-				if (!isDirectory) continue;
-
-				const skillFile = path.join(entryPath, "SKILL.md");
-				if (!fs.existsSync(skillFile)) continue;
-
-				loadSkillFromFile(skillFile, skillsByName);
-			}
-		}
-	} catch {
-		// Skip inaccessible directories
-	}
-}
-
-/**
- * Load a single skill from a SKILL.md file
- */
-function loadSkillFromFile(filePath: string, skillsByName: Map<string, Skill>): void {
-	try {
-		const content = fs.readFileSync(filePath, "utf-8");
-		const skillDir = path.dirname(filePath);
-		const parentDirName = path.basename(skillDir);
-		const { name, description } = parseFrontmatter(content, parentDirName);
-		
-		if (description && !skillsByName.has(name)) {
-			// First occurrence wins (earlier sources take precedence)
-			skillsByName.set(name, {
-				name,
-				description,
-				filePath,
-			});
-		}
-	} catch {
-		// Skip invalid skill files
-	}
-}
-
-/**
- * Load skills from known directories
- * Matches pi's skill loading order:
- * 1. ~/.codex/skills (recursive)
- * 2. ~/.claude/skills (claude format - one level)
- * 3. ${cwd}/.claude/skills (claude format - one level)
- * 4. ~/.pi/agent/skills (recursive)
- * 5. ${cwd}/.pi/skills (recursive)
- */
-function loadSkills(): Skill[] {
-	const skillsByName = new Map<string, Skill>();
-	
-	const skillDirs: SkillDirConfig[] = [
-		{ dir: path.join(os.homedir(), ".codex", "skills"), format: "recursive" },
-		{ dir: path.join(os.homedir(), ".claude", "skills"), format: "claude" },
-		{ dir: path.join(process.cwd(), ".claude", "skills"), format: "claude" },
-		{ dir: path.join(os.homedir(), ".pi", "agent", "skills"), format: "recursive" },
-		{ dir: path.join(os.homedir(), ".pi", "skills"), format: "recursive" },
-		{ dir: path.join(process.cwd(), ".pi", "skills"), format: "recursive" },
-	];
-
-	for (const { dir, format } of skillDirs) {
-		scanSkillDir(dir, format, skillsByName);
-	}
-
-	// Sort alphabetically by name
-	return Array.from(skillsByName.values()).sort((a, b) => a.name.localeCompare(b.name));
-}
-
-/**
- * Parse frontmatter from skill file
- */
-function parseFrontmatter(content: string, fallbackName: string): { name: string; description: string } {
-	if (!content.startsWith("---")) {
-		return { name: fallbackName, description: "" };
-	}
-
-	const endIndex = content.indexOf("\n---", 3);
-	if (endIndex === -1) {
-		return { name: fallbackName, description: "" };
-	}
-
-	const frontmatter = content.slice(4, endIndex);
-	let name = fallbackName;
-	let description = "";
-
-	for (const line of frontmatter.split("\n")) {
-		const colonIndex = line.indexOf(":");
-		if (colonIndex === -1) continue;
-
-		const key = line.slice(0, colonIndex).trim();
-		const value = line.slice(colonIndex + 1).trim();
-
-		if (key === "name") name = value;
-		if (key === "description") description = value;
-	}
-
-	return { name, description };
+function getLoadedSkills(ctx: ExtensionCommandContext): Skill[] {
+	return (ctx.getSystemPromptOptions().skills ?? [])
+		.map((skill) => ({
+			name: skill.name,
+			description: skill.description,
+			filePath: skill.filePath,
+		}))
+		.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**
@@ -706,7 +559,7 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 			theme.fg("accent", "◆ ") + 
 			theme.fg("customMessageLabel", theme.bold("Skill: ")) + 
 			theme.fg("accent", skillName),
-			1, 0
+			options.outputPad, 0
 		);
 		container.addChild(header);
 		
@@ -718,7 +571,7 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 		
 		// Add content lines with dim styling
 		for (const line of showLines) {
-			container.addChild(new Text(theme.fg("dim", line), 1, 0));
+			container.addChild(new Text(theme.fg("dim", line), options.outputPad, 0));
 		}
 		
 		// Show truncation indicator if collapsed and content is long
@@ -726,7 +579,7 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 			const hiddenCount = lines.length - PREVIEW_LINES;
 			container.addChild(new Text(
 				theme.fg("muted", `... ${hiddenCount} more lines (click to expand)`),
-				1, 0
+				options.outputPad, 0
 			));
 		}
 		
@@ -736,8 +589,15 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 	// Register the /skill command
 	pi.registerCommand("skill", {
 		description: "Open skill palette to select a skill for the next message",
-		handler: async (_args: string, ctx: ExtensionContext) => {
-			const skills = loadSkills();
+		handler: async (_args: string, ctx: ExtensionCommandContext) => {
+			if (ctx.mode !== "tui") {
+				if (ctx.hasUI) {
+					ctx.ui.notify("/skill requires interactive TUI mode", "warning");
+				}
+				return;
+			}
+
+			const skills = getLoadedSkills(ctx);
 
 			if (skills.length === 0) {
 				ctx.ui.setStatus("skill", "No skills found");
