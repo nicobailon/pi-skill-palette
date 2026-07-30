@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Updated extension imports and package peer dependencies for the `@earendil-works` pi packages.
 
 ### Fixed
+- Relative references inside a skill (for example `./assets`) now resolve against the skill's own directory instead of the current working directory. Queued skills are injected with `location` and a "References are relative to" line, matching pi's own skill expansion ([#3](https://github.com/nicobailon/pi-skill-palette/issues/3), reported by @hetzge).
 - Guard `/skill` so the overlay only opens in interactive TUI mode.
 - Respect pi's configured custom-message output padding in the skill preview renderer.
 
