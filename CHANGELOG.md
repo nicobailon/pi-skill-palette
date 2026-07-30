@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- Performance: cache the sorted skill index between palette openings, pre-normalize search text and narrow fuzzy matches incrementally while typing, and render skill previews as a single cached text block. Repeated palette opens and re-renders of large skill content are now near-instant, with byte-identical rendered output.
 - Use pi's loaded skill list instead of duplicating skill directory discovery, preserving current pi trust, package, settings, and deduplication behavior.
 - Updated extension imports and package peer dependencies for the `@earendil-works` pi packages.
 

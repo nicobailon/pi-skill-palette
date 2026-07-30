@@ -11,7 +11,7 @@
  */
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { matchesKey, Container, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { matchesKey, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -20,6 +20,9 @@ interface Skill {
 	name: string;
 	description: string;
 	filePath: string;
+	searchName: string;
+	searchDescription: string;
+	sortIndex: number;
 }
 
 interface SkillPaletteState {
@@ -108,14 +111,30 @@ function rainbowProgress(filled: number, total: number): string {
 // Load theme once at startup
 const paletteTheme = loadTheme();
 
+// Cache keyed on array identity: pi rebuilds its system-prompt options (new skills
+// array) on reload, so an identity change is exactly when re-indexing is needed.
+let loadedSkillsSource: ReturnType<ExtensionCommandContext["getSystemPromptOptions"]>["skills"];
+let loadedSkillsCache: Skill[] = [];
+
 function getLoadedSkills(ctx: ExtensionCommandContext): Skill[] {
-	return (ctx.getSystemPromptOptions().skills ?? [])
+	const source = ctx.getSystemPromptOptions().skills;
+	if (source === loadedSkillsSource) return loadedSkillsCache;
+
+	loadedSkillsSource = source;
+	loadedSkillsCache = (source ?? [])
 		.map((skill) => ({
 			name: skill.name,
 			description: skill.description,
 			filePath: skill.filePath,
 		}))
-		.sort((a, b) => a.name.localeCompare(b.name));
+		.sort((a, b) => a.name.localeCompare(b.name))
+		.map((skill, sortIndex) => ({
+			...skill,
+			searchName: skill.name.toLowerCase(),
+			searchDescription: skill.description.toLowerCase(),
+			sortIndex,
+		}));
+	return loadedSkillsCache;
 }
 
 /**
@@ -132,22 +151,19 @@ function getSkillContent(skill: Skill): string {
 }
 
 /**
- * Simple fuzzy match scoring
+ * Simple fuzzy match scoring. Expects query and text to be pre-lowercased.
  */
 function fuzzyScore(query: string, text: string): number {
-	const lowerQuery = query.toLowerCase();
-	const lowerText = text.toLowerCase();
-
-	if (lowerText.includes(lowerQuery)) {
-		return 100 + (lowerQuery.length / lowerText.length) * 50;
+	if (text.includes(query)) {
+		return 100 + (query.length / text.length) * 50;
 	}
 
 	let score = 0;
 	let queryIndex = 0;
 	let consecutiveBonus = 0;
 
-	for (let i = 0; i < lowerText.length && queryIndex < lowerQuery.length; i++) {
-		if (lowerText[i] === lowerQuery[queryIndex]) {
+	for (let i = 0; i < text.length && queryIndex < query.length; i++) {
+		if (text[i] === query[queryIndex]) {
 			score += 10 + consecutiveBonus;
 			consecutiveBonus += 5;
 			queryIndex++;
@@ -156,26 +172,25 @@ function fuzzyScore(query: string, text: string): number {
 		}
 	}
 
-	return queryIndex === lowerQuery.length ? score : 0;
+	return queryIndex === query.length ? score : 0;
 }
 
 /**
  * Filter and sort skills by fuzzy match
  */
 function filterSkills(skills: Skill[], query: string): Skill[] {
-	if (!query.trim()) return skills;
+	const normalizedQuery = query.trim().toLowerCase();
+	if (!normalizedQuery) return skills;
 
-	const scored = skills
-		.map((skill) => ({
-			skill,
-			score: Math.max(
-				fuzzyScore(query, skill.name),
-				fuzzyScore(query, skill.description) * 0.8
-			),
-		}))
-		.filter((item) => item.score > 0)
-		.sort((a, b) => b.score - a.score);
-
+	const scored: Array<{ skill: Skill; score: number }> = [];
+	for (const skill of skills) {
+		const score = Math.max(
+			fuzzyScore(normalizedQuery, skill.searchName),
+			fuzzyScore(normalizedQuery, skill.searchDescription) * 0.8
+		);
+		if (score > 0) scored.push({ skill, score });
+	}
+	scored.sort((a, b) => b.score - a.score || a.skill.sortIndex - b.skill.sortIndex);
 	return scored.map((item) => item.skill);
 }
 
@@ -341,6 +356,7 @@ class SkillPaletteComponent {
 	private filtered: Skill[];
 	private selected = 0;
 	private query = "";
+	private previousQuery = "";
 	private queuedSkillName: string | null;
 	private inactivityTimeout: ReturnType<typeof setTimeout> | null = null;
 	private static readonly INACTIVITY_MS = 60000; // Auto-dismiss after 60s of no input
@@ -417,7 +433,11 @@ class SkillPaletteComponent {
 	}
 
 	private updateFilter(): void {
-		this.filtered = filterSkills(this.allSkills, this.query);
+		// Extending the query can only shrink the match set, so narrow over the
+		// previous results; any other edit (backspace, paste) rescans all skills.
+		const candidates = this.query.startsWith(this.previousQuery) ? this.filtered : this.allSkills;
+		this.filtered = filterSkills(candidates, this.query);
+		this.previousQuery = this.query;
 		this.selected = 0; // Always jump to top match when typing
 	}
 
@@ -552,38 +572,21 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 		const contentMatch = rawContent.match(/<skill[^>]*>\n?([\s\S]*?)\n?<\/skill>/);
 		const skillContent = contentMatch?.[1]?.trim() || rawContent;
 		
-		const container = new Container();
-		
-		// Header with file icon and skill name (like read tool)
-		const header = new Text(
-			theme.fg("accent", "◆ ") + 
-			theme.fg("customMessageLabel", theme.bold("Skill: ")) + 
-			theme.fg("accent", skillName),
-			options.outputPad, 0
-		);
-		container.addChild(header);
-		
 		// Content preview (collapsible like read tool)
-		const lines = skillContent.split("\n");
 		const PREVIEW_LINES = 8;
-		const isLong = lines.length > PREVIEW_LINES;
-		const showLines = options.expanded ? lines : lines.slice(0, PREVIEW_LINES);
-		
-		// Add content lines with dim styling
-		for (const line of showLines) {
-			container.addChild(new Text(theme.fg("dim", line), options.outputPad, 0));
+		const parts = [
+			theme.fg("accent", "◆ ") +
+				theme.fg("customMessageLabel", theme.bold("Skill: ")) +
+				theme.fg("accent", skillName),
+		];
+		// Dim each line separately so ANSI resets stay per-line, matching the old per-line Text output
+		const lines = skillContent.split("\n");
+		const shownLines = options.expanded ? lines : lines.slice(0, PREVIEW_LINES);
+		parts.push(shownLines.map((line) => theme.fg("dim", line)).join("\n"));
+		if (!options.expanded && lines.length > PREVIEW_LINES) {
+			parts.push(theme.fg("muted", `... ${lines.length - PREVIEW_LINES} more lines (click to expand)`));
 		}
-		
-		// Show truncation indicator if collapsed and content is long
-		if (!options.expanded && isLong) {
-			const hiddenCount = lines.length - PREVIEW_LINES;
-			container.addChild(new Text(
-				theme.fg("muted", `... ${hiddenCount} more lines (click to expand)`),
-				options.outputPad, 0
-			));
-		}
-		
-		return container;
+		return new Text(parts.join("\n"), options.outputPad, 0);
 	});
 
 	// Register the /skill command
