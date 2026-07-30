@@ -4,7 +4,7 @@ All notable changes to pi-skill-palette will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [2.0.0] - 2026-07-30
 
 ### Removed
 - **Breaking:** the palette no longer scans `~/.codex/skills`, `~/.claude/skills`, or `<cwd>/.claude/skills`. Skill discovery is now entirely pi's, and pi does not read those directories, so skills kept only there will stop appearing in `/skill`. To restore them, either symlink them into a directory pi does read (`~/.pi/agent/skills`, `<cwd>/.pi/skills`, `~/.agents/skills`, or `<cwd>/.agents/skills` — symlinks are followed), or add their paths to pi's configured skill paths.
