@@ -4,3 +4,5 @@ theme.json
 # Local development state
 package-lock.json
 progress.md
+node_modules/
+.pi-subagents/
