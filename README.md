@@ -4,7 +4,7 @@
 
 # Pi Skill Palette
 
-A command palette for [Pi coding agent](https://github.com/earendil-works/pi) that lets you explicitly select which skill to inject with your next message.
+A command palette for [Pi coding agent](https://github.com/earendil-works/pi) that lets you explicitly select up to three skills to inject with your next message.
 
 ```
 /skill
@@ -29,9 +29,20 @@ Restart pi to load the extension.
 1. Type `/skill` and press Enter
 2. Start typing to fuzzy-filter skills
 3. Use `↑`/`↓` to navigate, `Enter` to select
-4. Send your message - the skill context is automatically included
+4. Send your message - the queued skill context is automatically included
 
-The selected skill appears in the footer and a widget until consumed. Re-select a queued skill to unqueue it (with confirmation).
+You can queue up to three different skills. Run `/skill` again to add another skill. The queued skills appear in the footer and widget until consumed. Re-select a queued skill to unqueue it (with confirmation).
+
+## Multi-skill Commands
+
+You can also load multiple skills with Pi's `/skill:` syntax:
+
+```bash
+/skill:typescript-code,/skill:react-best-practices build this component
+/skill:typescript-code,react-best-practices,frontend-design build this component
+```
+
+The extension accepts up to three different skills. If you omit the prompt, the skills are queued for your next message.
 
 ## Keyboard Shortcuts
 
@@ -86,7 +97,7 @@ Theme values are ANSI SGR codes (`"36"` for cyan, `"2;3"` for dim+italic, `"38;2
 
 ## How It Works
 
-When you select a skill, it's queued in memory with visual indicators in the footer and widget. On your next message, the skill content is sent via the `before_agent_start` extension event as a custom message alongside your prompt. The palette uses pi's loaded skill list, so skill precedence, trust checks, package resources, configured paths, and deduplication are handled by pi.
+When you select a skill, it's queued in memory with visual indicators in the footer and widget. On your next message, all queued skill content is sent via the `before_agent_start` extension event as a custom message alongside your prompt. The palette uses pi's loaded skill list, so skill precedence, trust checks, package resources, configured paths, and deduplication are handled by pi.
 
 ## Limitations
 

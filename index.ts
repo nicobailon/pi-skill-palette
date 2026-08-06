@@ -10,7 +10,7 @@
  * https://github.com/nicobailon/pi-skill-palette
  */
 
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { matchesKey, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -27,12 +27,14 @@ interface Skill {
 }
 
 interface SkillPaletteState {
-	queuedSkill: Skill | null;
+	queuedSkills: Skill[];
 }
+
+const MAX_QUEUED_SKILLS = 3;
 
 // Shared state across the extension
 const state: SkillPaletteState = {
-	queuedSkill: null,
+	queuedSkills: [],
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -139,6 +141,54 @@ function getLoadedSkills(ctx: ExtensionCommandContext): Skill[] {
 	return loadedSkillsCache;
 }
 
+function getQueuedSkillNames(): Set<string> {
+	return new Set(state.queuedSkills.map((skill) => skill.name));
+}
+
+function formatSkillList(skills: Skill[]): string {
+	return skills.map((skill) => skill.name).join(", ");
+}
+
+function addQueuedSkills(skills: Skill[]): { added: Skill[]; overflow: Skill | null } {
+	const names = getQueuedSkillNames();
+	const next = [...state.queuedSkills];
+	const added: Skill[] = [];
+
+	for (const skill of skills) {
+		if (names.has(skill.name)) continue;
+		if (next.length >= MAX_QUEUED_SKILLS) {
+			return { added, overflow: skill };
+		}
+		next.push(skill);
+		names.add(skill.name);
+		added.push(skill);
+	}
+
+	state.queuedSkills = next;
+	return { added, overflow: null };
+}
+
+function removeQueuedSkill(skill: Skill): void {
+	state.queuedSkills = state.queuedSkills.filter((queuedSkill) => queuedSkill.name !== skill.name);
+}
+
+function updateQueuedSkillIndicators(ctx: Pick<ExtensionContext, "ui">, skills = state.queuedSkills): void {
+	if (skills.length === 0) {
+		ctx.ui.setStatus("skill", undefined);
+		ctx.ui.setWidget("skill", undefined);
+		return;
+	}
+
+	const names = formatSkillList(skills);
+	const count = `${skills.length}/${MAX_QUEUED_SKILLS}`;
+	ctx.ui.setStatus("skill", `📚 ${count} ${names}`);
+	ctx.ui.setWidget("skill", [`\x1b[2m📚 Skills (${count}): \x1b[0m\x1b[36m${names}\x1b[0m\x1b[2m — will be applied to next message\x1b[0m`]);
+}
+
+function escapeAttribute(value: string): string {
+	return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 /**
  * Get skill content without frontmatter
  */
@@ -150,6 +200,16 @@ function getSkillContent(skill: Skill): string {
 	if (endIndex === -1) return raw;
 
 	return raw.slice(endIndex + 4).trim();
+}
+
+function buildSkillContext(skills: Skill[]): string {
+	const blocks = skills.map((skill) => {
+		const skillContent = getSkillContent(skill);
+		return `<skill name="${escapeAttribute(skill.name)}" location="${escapeAttribute(skill.filePath)}">\nReferences are relative to ${skill.baseDir}.\n\n${skillContent}\n</skill>`;
+	});
+
+	if (blocks.length === 1) return blocks[0];
+	return `<skills count="${blocks.length}">\n${blocks.join("\n\n")}\n</skills>`;
 }
 
 /**
@@ -194,6 +254,60 @@ function filterSkills(skills: Skill[], query: string): Skill[] {
 	}
 	scored.sort((a, b) => b.score - a.score || a.skill.sortIndex - b.skill.sortIndex);
 	return scored.map((item) => item.skill);
+}
+
+interface ParsedSkillCommands {
+	skills: Skill[];
+	prompt: string;
+}
+
+const SKILL_COMMAND_PREFIX = "/skill:";
+
+function isCommandBoundary(char: string | undefined): boolean {
+	return char === undefined || char === "" || /[\s,]/.test(char);
+}
+
+function matchSkillAt(text: string, index: number, skills: Skill[]): Skill | null {
+	for (const skill of skills) {
+		if (text.startsWith(skill.name, index) && isCommandBoundary(text[index + skill.name.length])) {
+			return skill;
+		}
+	}
+	return null;
+}
+
+function parseSkillCommands(text: string, skills: Skill[]): ParsedSkillCommands | null {
+	let index = 0;
+	let first = true;
+	const selected: Skill[] = [];
+	const sortedSkills = [...skills].sort((a, b) => b.name.length - a.name.length);
+
+	while (index < text.length) {
+		while (/\s/.test(text[index] ?? "")) index++;
+
+		if (first) {
+			if (!text.startsWith(SKILL_COMMAND_PREFIX, index)) return null;
+			index += SKILL_COMMAND_PREFIX.length;
+		} else if (text.startsWith(SKILL_COMMAND_PREFIX, index)) {
+			index += SKILL_COMMAND_PREFIX.length;
+		} else if (text[index] === ",") {
+			index++;
+			while (/\s/.test(text[index] ?? "")) index++;
+			if (text.startsWith(SKILL_COMMAND_PREFIX, index)) {
+				index += SKILL_COMMAND_PREFIX.length;
+			}
+		} else {
+			break;
+		}
+
+		const skill = matchSkillAt(text, index, sortedSkills);
+		if (!skill) return null;
+		selected.push(skill);
+		index += skill.name.length;
+		first = false;
+	}
+
+	return selected.length > 0 ? { skills: selected, prompt: text.slice(index).trimStart() } : null;
 }
 
 /**
@@ -301,28 +415,28 @@ class ConfirmDialog {
 		lines.push(border("╭" + "─".repeat(leftBorder)) + title(titleText) + border("─".repeat(rightBorder) + "╮"));
 
 		lines.push(emptyRow());
-		
+
 		// Skill name with icon
 		lines.push(centerRow(`${selected("◆")} ${bold(this.skillName)}`));
-		
+
 		lines.push(emptyRow());
 
 		// Divider
 		lines.push(border("├" + "─".repeat(innerW) + "┤"));
-		
+
 		lines.push(emptyRow());
 
 		// Buttons - pill style with inverse for selection
 		const removeLabel = "  Remove  ";
 		const keepLabel = "  Keep  ";
-		
-		const removeBtn = this.selected === 0 
+
+		const removeBtn = this.selected === 0
 			? inverse(bold(cancel(removeLabel)))
 			: hint(removeLabel);
-		const keepBtn = this.selected === 1 
+		const keepBtn = this.selected === 1
 			? inverse(bold(confirm(keepLabel)))
 			: hint(keepLabel);
-		
+
 		lines.push(centerRow(`${removeBtn}   ${keepBtn}`));
 
 		lines.push(emptyRow());
@@ -344,7 +458,7 @@ class ConfirmDialog {
 	}
 
 	invalidate(): void {}
-	
+
 	dispose(): void {
 		this.cleanup();
 	}
@@ -359,18 +473,20 @@ class SkillPaletteComponent {
 	private selected = 0;
 	private query = "";
 	private previousQuery = "";
-	private queuedSkillName: string | null;
+	private queuedSkillNames: Set<string>;
+	private queuedSkillCount: number;
 	private inactivityTimeout: ReturnType<typeof setTimeout> | null = null;
 	private static readonly INACTIVITY_MS = 60000; // Auto-dismiss after 60s of no input
 
 	constructor(
 		skills: Skill[],
-		queuedSkill: Skill | null,
+		queuedSkills: Skill[],
 		private done: (skill: Skill | null, action: "select" | "unqueue" | "cancel") => void
 	) {
 		this.allSkills = skills;
 		this.filtered = skills;
-		this.queuedSkillName = queuedSkill?.name ?? null;
+		this.queuedSkillNames = new Set(queuedSkills.map((skill) => skill.name));
+		this.queuedSkillCount = queuedSkills.length;
 		this.resetInactivityTimeout();
 	}
 
@@ -396,7 +512,7 @@ class SkillPaletteComponent {
 			if (skill) {
 				this.cleanup();
 				// Toggle: if already queued, unqueue it
-				if (skill.name === this.queuedSkillName) {
+				if (this.queuedSkillNames.has(skill.name)) {
 					this.done(skill, "unqueue");
 				} else {
 					this.done(skill, "select");
@@ -502,15 +618,15 @@ class SkillPaletteComponent {
 			for (let i = startIndex; i < endIndex; i++) {
 				const skill = this.filtered[i];
 				const isSelected = i === this.selected;
-				const isQueued = skill.name === this.queuedSkillName;
-				
+				const isQueued = this.queuedSkillNames.has(skill.name);
+
 				// Build the skill line
 				const prefix = isSelected ? selected("▸") : border("·");
 				const queuedBadge = isQueued ? ` ${queued("●")}` : "";
 				const nameStr = isSelected ? bold(selectedText(skill.name)) : skill.name;
 				const maxDescLen = Math.max(0, innerW - visLen(skill.name) - 12);
 				const descStr = maxDescLen > 3 ? description(truncateToWidth(skill.description, maxDescLen, "…")) : "";
-				
+
 				const separator = descStr ? `  ${border("—")}  ` : "";
 				const skillLine = `${prefix} ${nameStr}${queuedBadge}${separator}${descStr}`;
 				lines.push(row(skillLine));
@@ -533,9 +649,10 @@ class SkillPaletteComponent {
 		lines.push(emptyRow());
 
 		// Footer hints - minimal and elegant
-		const hints = this.queuedSkillName 
-			? `${italic("↑↓")} navigate  ${italic("enter")} select${hint("/")}unqueue  ${italic("esc")} cancel`
-			: `${italic("↑↓")} navigate  ${italic("enter")} select  ${italic("esc")} cancel`;
+		const count = `${this.queuedSkillCount}/${MAX_QUEUED_SKILLS}`;
+		const hints = this.queuedSkillCount > 0
+			? `${italic("↑↓")} navigate  ${italic("enter")} select${hint("/")}unqueue  ${hint(count)} queued  ${italic("esc")} cancel`
+			: `${italic("↑↓")} navigate  ${italic("enter")} select  ${hint(count)} queued  ${italic("esc")} cancel`;
 		lines.push(row(hint(hints)));
 
 		// Bottom border
@@ -552,7 +669,7 @@ class SkillPaletteComponent {
 	}
 
 	invalidate(): void {}
-	
+
 	dispose(): void {
 		this.cleanup();
 	}
@@ -567,19 +684,21 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 			: Array.isArray(message.content)
 				? message.content.map((c: { type: string; text?: string }) => c.type === "text" ? c.text || "" : "").join("")
 				: "";
-		const nameMatch = rawContent.match(/<skill name="([^"]+)"/);
-		const skillName = nameMatch?.[1] || "Unknown Skill";
-		
-		// Extract skill content (between <skill> tags)
-		const contentMatch = rawContent.match(/<skill[^>]*>\n?([\s\S]*?)\n?<\/skill>/);
-		const skillContent = contentMatch?.[1]?.trim() || rawContent;
-		
+		const skillMatches = Array.from(rawContent.matchAll(/<skill name="([^"]+)"[^>]*>\n?([\s\S]*?)\n?<\/skill>/g));
+		const skillNames = skillMatches.map((match) => match[1]);
+		const skillTitle = skillNames.length > 1
+			? `${skillNames.length}/${MAX_QUEUED_SKILLS} ${skillNames.join(", ")}`
+			: skillNames[0] ?? "Unknown Skill";
+		const skillContent = skillMatches.length > 1
+			? skillMatches.map((match) => `# ${match[1]}\n${match[2].trim()}`).join("\n\n")
+			: skillMatches[0]?.[2]?.trim() || rawContent;
+
 		// Content preview (collapsible like read tool)
 		const PREVIEW_LINES = 8;
 		const parts = [
 			theme.fg("accent", "◆ ") +
-				theme.fg("customMessageLabel", theme.bold("Skill: ")) +
-				theme.fg("accent", skillName),
+				theme.fg("customMessageLabel", theme.bold(skillNames.length > 1 ? "Skills: " : "Skill: ")) +
+				theme.fg("accent", skillTitle),
 		];
 		// Dim each line separately so ANSI resets stay per-line, matching the old per-line Text output
 		const lines = skillContent.split("\n");
@@ -614,17 +733,20 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 			const result = await ctx.ui.custom<{ skill: Skill | null; action: "select" | "unqueue" | "cancel" }>(
 				(_tui, _theme, _keybindings, done) => new SkillPaletteComponent(
 					skills,
-					state.queuedSkill,
+					state.queuedSkills,
 					(skill, action) => done({ skill, action })
 				),
 				{ overlay: true, overlayOptions: { anchor: "center", width: 70 } }
 			);
 
 			if (result.action === "select" && result.skill) {
-				state.queuedSkill = result.skill;
-				ctx.ui.setStatus("skill", `📚 ${result.skill.name}`);
-				ctx.ui.setWidget("skill", [`\x1b[2m📚 Skill: \x1b[0m\x1b[36m${result.skill.name}\x1b[0m\x1b[2m — will be applied to next message\x1b[0m`]);
-				ctx.ui.notify(`Skill queued: ${result.skill.name}`, "info");
+				const queued = addQueuedSkills([result.skill]);
+				if (queued.overflow) {
+					ctx.ui.notify(`You can queue up to ${MAX_QUEUED_SKILLS} skills. Unqueue one first.`, "warning");
+					return;
+				}
+				updateQueuedSkillIndicators(ctx);
+				ctx.ui.notify(`Skill queued (${state.queuedSkills.length}/${MAX_QUEUED_SKILLS}): ${result.skill.name}`, "info");
 			} else if (result.action === "unqueue" && result.skill) {
 				// Show confirmation dialog
 				const confirmed = await ctx.ui.custom<boolean>(
@@ -637,43 +759,87 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 				);
 
 				if (confirmed) {
-					state.queuedSkill = null;
-					ctx.ui.setStatus("skill", undefined);
-					ctx.ui.setWidget("skill", undefined);
-					ctx.ui.notify("Skill unqueued", "info");
+					removeQueuedSkill(result.skill);
+					updateQueuedSkillIndicators(ctx);
+					ctx.ui.notify(`Skill unqueued: ${result.skill.name}`, "info");
 				}
 			}
 		},
 	});
 
+	pi.on("input", (event, ctx) => {
+		if (event.source === "extension" || !event.text.startsWith(SKILL_COMMAND_PREFIX)) {
+			return { action: "continue" as const };
+		}
+
+		const commandSkills = pi.getCommands()
+			.filter((command) => command.source === "skill" && command.name.startsWith("skill:") && command.sourceInfo.path)
+			.map((command, sortIndex): Skill => {
+				const name = command.name.slice("skill:".length);
+				return {
+					name,
+					description: command.description ?? "",
+					filePath: command.sourceInfo.path,
+					baseDir: command.sourceInfo.baseDir ?? path.dirname(command.sourceInfo.path),
+					searchName: name.toLowerCase(),
+					searchDescription: (command.description ?? "").toLowerCase(),
+					sortIndex,
+				};
+			});
+		const parsed = parseSkillCommands(event.text, commandSkills);
+		if (!parsed || parsed.skills.length <= 1) {
+			return { action: "continue" as const };
+		}
+
+		const uniqueSkills = parsed.skills.filter((skill, index, skills) =>
+			skills.findIndex((candidate) => candidate.name === skill.name) === index
+		);
+		const totalAfterQueue = new Set([...state.queuedSkills, ...uniqueSkills].map((skill) => skill.name)).size;
+		if (totalAfterQueue > MAX_QUEUED_SKILLS) {
+			if (ctx.hasUI) {
+				ctx.ui.notify(`You can load up to ${MAX_QUEUED_SKILLS} different skills at once.`, "warning");
+			}
+			return { action: "handled" as const };
+		}
+
+		addQueuedSkills(uniqueSkills);
+		if (ctx.hasUI) {
+			updateQueuedSkillIndicators(ctx);
+			ctx.ui.notify(`Queued ${state.queuedSkills.length}/${MAX_QUEUED_SKILLS} skills: ${formatSkillList(state.queuedSkills)}`, "info");
+		}
+
+		if (!parsed.prompt) {
+			return { action: "handled" as const };
+		}
+		return { action: "transform" as const, text: parsed.prompt };
+	});
+
 	// Handle the before_agent_start event to send skill content as custom message
 	pi.on("before_agent_start", async (_event, ctx) => {
-		if (!state.queuedSkill) {
+		if (state.queuedSkills.length === 0) {
 			return {};
 		}
 
-		const skill = state.queuedSkill;
-		state.queuedSkill = null;
+		const skills = state.queuedSkills;
+		state.queuedSkills = [];
 
 		// Clear the visual indicators (use optional chaining for non-UI contexts)
 		ctx.ui?.setStatus("skill", undefined);
 		ctx.ui?.setWidget("skill", undefined);
 
 		try {
-			const skillContent = getSkillContent(skill);
-
 			return {
 				message: {
 					customType: "skill-context",
 					// Mirrors pi's own skill expansion so relative references inside a skill
 					// resolve against the skill directory rather than the cwd.
-					content: `<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${skillContent}\n</skill>`,
+					content: buildSkillContext(skills),
 					display: true,  // Show the skill injection in chat
 				},
 			};
 		} catch {
 			ctx.ui?.setWidget("skill", undefined);
-			ctx.ui?.notify(`Failed to load skill: ${skill.name}`, "warning");
+			ctx.ui?.notify(`Failed to load queued skills: ${formatSkillList(skills)}`, "warning");
 			return {};
 		}
 	});
