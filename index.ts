@@ -149,23 +149,25 @@ function formatSkillList(skills: Skill[]): string {
 	return skills.map((skill) => skill.name).join(", ");
 }
 
-function addQueuedSkills(skills: Skill[]): { added: Skill[]; overflow: Skill | null } {
+type QueueSkillsResult =
+	| { status: "queued" }
+	| { status: "full" };
+
+function queueSkills(skills: Skill[]): QueueSkillsResult {
 	const names = getQueuedSkillNames();
 	const next = [...state.queuedSkills];
-	const added: Skill[] = [];
 
 	for (const skill of skills) {
 		if (names.has(skill.name)) continue;
 		if (next.length >= MAX_QUEUED_SKILLS) {
-			return { added, overflow: skill };
+			return { status: "full" };
 		}
 		next.push(skill);
 		names.add(skill.name);
-		added.push(skill);
 	}
 
 	state.queuedSkills = next;
-	return { added, overflow: null };
+	return { status: "queued" };
 }
 
 function removeQueuedSkill(skill: Skill): void {
@@ -264,7 +266,7 @@ interface ParsedSkillCommands {
 const SKILL_COMMAND_PREFIX = "/skill:";
 
 function isCommandBoundary(char: string | undefined): boolean {
-	return char === undefined || char === "" || /[\s,]/.test(char);
+	return char === undefined || /[\s,]/.test(char);
 }
 
 function matchSkillAt(text: string, index: number, skills: Skill[]): Skill | null {
@@ -675,15 +677,26 @@ class SkillPaletteComponent {
 	}
 }
 
+function extractTextPart(value: unknown): string {
+	if (typeof value !== "object" || value === null || !("type" in value)) return "";
+
+	const part = value as { type?: unknown; text?: unknown };
+	if (part.type !== "text") return "";
+	return typeof part.text === "string" ? part.text : "";
+}
+
+function extractTextContent(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+
+	return content.map(extractTextPart).join("");
+}
+
 export default function skillPaletteExtension(pi: ExtensionAPI): void {
 	// Register custom renderer for skill-context messages
 	pi.registerMessageRenderer("skill-context", (message, options, theme) => {
 		// Extract skill name and content (handle both string and array content)
-		const rawContent = typeof message.content === "string"
-			? message.content
-			: Array.isArray(message.content)
-				? message.content.map((c: { type: string; text?: string }) => c.type === "text" ? c.text || "" : "").join("")
-				: "";
+		const rawContent = extractTextContent(message.content);
 		const skillMatches = Array.from(rawContent.matchAll(/<skill name="([^"]+)"[^>]*>\n?([\s\S]*?)\n?<\/skill>/g));
 		const skillNames = skillMatches.map((match) => match[1]);
 		const skillTitle = skillNames.length > 1
@@ -740,18 +753,18 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 			);
 
 			if (result.action === "select" && result.skill) {
-				const queued = addQueuedSkills([result.skill]);
-				if (queued.overflow) {
+				const queueResult = queueSkills([result.skill]);
+				if (queueResult.status === "full") {
 					ctx.ui.notify(`You can queue up to ${MAX_QUEUED_SKILLS} skills. Unqueue one first.`, "warning");
 					return;
 				}
 				updateQueuedSkillIndicators(ctx);
 				ctx.ui.notify(`Skill queued (${state.queuedSkills.length}/${MAX_QUEUED_SKILLS}): ${result.skill.name}`, "info");
 			} else if (result.action === "unqueue" && result.skill) {
-				// Show confirmation dialog
+				const skill = result.skill;
 				const confirmed = await ctx.ui.custom<boolean>(
 					(tui, _theme, _keybindings, done) => {
-						const dialog = new ConfirmDialog(result.skill!.name, done);
+						const dialog = new ConfirmDialog(skill.name, done);
 						dialog.setRequestRender(() => tui.requestRender());
 						return dialog;
 					},
@@ -759,9 +772,9 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 				);
 
 				if (confirmed) {
-					removeQueuedSkill(result.skill);
+					removeQueuedSkill(skill);
 					updateQueuedSkillIndicators(ctx);
-					ctx.ui.notify(`Skill unqueued: ${result.skill.name}`, "info");
+					ctx.ui.notify(`Skill unqueued: ${skill.name}`, "info");
 				}
 			}
 		},
@@ -794,15 +807,13 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 		const uniqueSkills = parsed.skills.filter((skill, index, skills) =>
 			skills.findIndex((candidate) => candidate.name === skill.name) === index
 		);
-		const totalAfterQueue = new Set([...state.queuedSkills, ...uniqueSkills].map((skill) => skill.name)).size;
-		if (totalAfterQueue > MAX_QUEUED_SKILLS) {
+		const queueResult = queueSkills(uniqueSkills);
+		if (queueResult.status === "full") {
 			if (ctx.hasUI) {
 				ctx.ui.notify(`You can load up to ${MAX_QUEUED_SKILLS} different skills at once.`, "warning");
 			}
 			return { action: "handled" as const };
 		}
-
-		addQueuedSkills(uniqueSkills);
 		if (ctx.hasUI) {
 			updateQueuedSkillIndicators(ctx);
 			ctx.ui.notify(`Queued ${state.queuedSkills.length}/${MAX_QUEUED_SKILLS} skills: ${formatSkillList(state.queuedSkills)}`, "info");
