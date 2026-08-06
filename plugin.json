@@ -1,0 +1,12 @@
+{
+	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+	"name": "pi-skill-palette",
+	"version": "2.0.0",
+	"description": "Command palette for selecting and applying skills in pi",
+	"author": {
+		"name": "nicobailon"
+	},
+	"repository": "https://github.com/nicobailon/pi-skill-palette",
+	"license": "MIT",
+	"keywords": ["pi", "skills", "agent-plugin"]
+}

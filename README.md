@@ -24,6 +24,10 @@ pi install npm:pi-skill-palette
 
 Restart pi to load the extension.
 
+## Compatibility
+
+This package includes an [Agent Plugins](https://agent-plugins.org/) v1.0.0 `plugin.json` manifest for portable package metadata. Runtime behavior remains Pi-specific through `package.json` and `index.ts`. The package does not expose portable `skills/` or `mcp.json` components.
+
 ## Quick Start
 
 1. Type `/skill` and press Enter
