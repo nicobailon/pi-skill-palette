@@ -11,7 +11,7 @@
  */
 
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { matchesKey, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { matchesKey, Text, truncateToWidth, visibleWidth, type AutocompleteProvider } from "@earendil-works/pi-tui";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -119,18 +119,8 @@ const paletteTheme = loadTheme();
 let loadedSkillsSource: ReturnType<ExtensionCommandContext["getSystemPromptOptions"]>["skills"];
 let loadedSkillsCache: Skill[] = [];
 
-function getLoadedSkills(ctx: ExtensionCommandContext): Skill[] {
-	const source = ctx.getSystemPromptOptions().skills;
-	if (source === loadedSkillsSource) return loadedSkillsCache;
-
-	loadedSkillsSource = source;
-	loadedSkillsCache = (source ?? [])
-		.map((skill) => ({
-			name: skill.name,
-			description: skill.description,
-			filePath: skill.filePath,
-			baseDir: skill.baseDir,
-		}))
+function indexSkills(skills: Array<Pick<Skill, "name" | "description" | "filePath" | "baseDir">>): Skill[] {
+	return [...skills]
 		.sort((a, b) => a.name.localeCompare(b.name))
 		.map((skill, sortIndex) => ({
 			...skill,
@@ -138,7 +128,34 @@ function getLoadedSkills(ctx: ExtensionCommandContext): Skill[] {
 			searchDescription: skill.description.toLowerCase(),
 			sortIndex,
 		}));
+}
+
+function getLoadedSkills(ctx: ExtensionCommandContext): Skill[] {
+	const source = ctx.getSystemPromptOptions().skills;
+	if (source === loadedSkillsSource) return loadedSkillsCache;
+
+	loadedSkillsSource = source;
+	loadedSkillsCache = indexSkills((source ?? []).map((skill) => ({
+		name: skill.name,
+		description: skill.description,
+		filePath: skill.filePath,
+		baseDir: skill.baseDir,
+	})));
 	return loadedSkillsCache;
+}
+
+function getCommandSkills(pi: ExtensionAPI): Skill[] {
+	return indexSkills(pi.getCommands()
+		.filter((command) => command.source === "skill" && command.name.startsWith("skill:") && command.sourceInfo.path)
+		.map((command) => {
+			const name = command.name.slice("skill:".length);
+			return {
+				name,
+				description: command.description ?? "",
+				filePath: command.sourceInfo.path,
+				baseDir: command.sourceInfo.baseDir ?? path.dirname(command.sourceInfo.path),
+			};
+		}));
 }
 
 function getQueuedSkillNames(): Set<string> {
@@ -263,6 +280,11 @@ interface ParsedSkillCommands {
 	prompt: string;
 }
 
+interface SkillCompletionToken {
+	prefix: string;
+	selectedNames: Set<string>;
+}
+
 const SKILL_COMMAND_PREFIX = "/skill:";
 
 function isCommandBoundary(char: string | undefined): boolean {
@@ -310,6 +332,75 @@ function parseSkillCommands(text: string, skills: Skill[]): ParsedSkillCommands 
 	}
 
 	return selected.length > 0 ? { skills: selected, prompt: text.slice(index).trimStart() } : null;
+}
+
+function findSkillCompletionToken(textBeforeCursor: string): SkillCompletionToken | null {
+	const commandStart = textBeforeCursor.search(/\S/);
+	if (commandStart === -1 || !textBeforeCursor.startsWith(SKILL_COMMAND_PREFIX, commandStart)) return null;
+
+	let index = commandStart + SKILL_COMMAND_PREFIX.length;
+	const selectedNames = new Set<string>();
+
+	while (index <= textBeforeCursor.length) {
+		const tokenStart = index;
+		while (index < textBeforeCursor.length && !/[\s,]/.test(textBeforeCursor[index] ?? "")) index++;
+
+		const token = textBeforeCursor.slice(tokenStart, index);
+		if (index === textBeforeCursor.length) return { prefix: token, selectedNames };
+
+		if (token) selectedNames.add(token);
+
+		if (textBeforeCursor[index] === ",") {
+			index++;
+			while (/[\t ]/.test(textBeforeCursor[index] ?? "")) index++;
+			if (textBeforeCursor.startsWith(SKILL_COMMAND_PREFIX, index)) {
+				index += SKILL_COMMAND_PREFIX.length;
+			}
+			if (index === textBeforeCursor.length) return { prefix: "", selectedNames };
+			continue;
+		}
+
+		while (/\s/.test(textBeforeCursor[index] ?? "")) index++;
+		if (!textBeforeCursor.startsWith(SKILL_COMMAND_PREFIX, index)) return null;
+		index += SKILL_COMMAND_PREFIX.length;
+		if (index === textBeforeCursor.length) return { prefix: "", selectedNames };
+	}
+
+	return null;
+}
+
+function createSkillAutocompleteProvider(current: AutocompleteProvider, pi: ExtensionAPI): AutocompleteProvider {
+	return {
+		triggerCharacters: [":", ","],
+		async getSuggestions(lines, cursorLine, cursorCol, options) {
+			const line = lines[cursorLine] ?? "";
+			const token = findSkillCompletionToken(line.slice(0, cursorCol));
+			if (!token) return current.getSuggestions(lines, cursorLine, cursorCol, options);
+
+			const blockedNames = new Set([
+				...token.selectedNames,
+				...state.queuedSkills.map((skill) => skill.name),
+			]);
+			if (blockedNames.size >= MAX_QUEUED_SKILLS) return null;
+
+			const suggestions = filterSkills(getCommandSkills(pi), token.prefix)
+				.filter((skill) => !blockedNames.has(skill.name))
+				.map((skill) => ({
+					value: skill.name,
+					label: skill.name,
+					description: skill.description,
+				}));
+			if (suggestions.length === 0) return null;
+
+			return { prefix: token.prefix, items: suggestions };
+		},
+		applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
+			return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
+		},
+		shouldTriggerFileCompletion(lines, cursorLine, cursorCol) {
+			return current.shouldTriggerFileCompletion?.(lines, cursorLine, cursorCol) ?? true;
+		},
+	};
 }
 
 /**
@@ -780,26 +871,16 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.on("session_start", (_event, ctx) => {
+		ctx.ui.addAutocompleteProvider((current) => createSkillAutocompleteProvider(current, pi));
+	});
+
 	pi.on("input", (event, ctx) => {
 		if (event.source === "extension" || !event.text.startsWith(SKILL_COMMAND_PREFIX)) {
 			return { action: "continue" as const };
 		}
 
-		const commandSkills = pi.getCommands()
-			.filter((command) => command.source === "skill" && command.name.startsWith("skill:") && command.sourceInfo.path)
-			.map((command, sortIndex): Skill => {
-				const name = command.name.slice("skill:".length);
-				return {
-					name,
-					description: command.description ?? "",
-					filePath: command.sourceInfo.path,
-					baseDir: command.sourceInfo.baseDir ?? path.dirname(command.sourceInfo.path),
-					searchName: name.toLowerCase(),
-					searchDescription: (command.description ?? "").toLowerCase(),
-					sortIndex,
-				};
-			});
-		const parsed = parseSkillCommands(event.text, commandSkills);
+		const parsed = parseSkillCommands(event.text, getCommandSkills(pi));
 		if (!parsed || parsed.skills.length <= 1) {
 			return { action: "continue" as const };
 		}
