@@ -118,6 +118,7 @@ const paletteTheme = loadTheme();
 // array) on reload, so an identity change is exactly when re-indexing is needed.
 let loadedSkillsSource: ReturnType<ExtensionCommandContext["getSystemPromptOptions"]>["skills"];
 let loadedSkillsCache: Skill[] = [];
+let commandSkillsCache: Skill[] | null = null;
 
 function indexSkills(skills: Array<Pick<Skill, "name" | "description" | "filePath" | "baseDir">>): Skill[] {
 	return [...skills]
@@ -145,7 +146,7 @@ function getLoadedSkills(ctx: ExtensionCommandContext): Skill[] {
 }
 
 function getCommandSkills(pi: ExtensionAPI): Skill[] {
-	return indexSkills(pi.getCommands()
+	commandSkillsCache ??= indexSkills(pi.getCommands()
 		.filter((command) => command.source === "skill" && command.name.startsWith("skill:") && command.sourceInfo.path)
 		.map((command) => {
 			const name = command.name.slice("skill:".length);
@@ -156,6 +157,7 @@ function getCommandSkills(pi: ExtensionAPI): Skill[] {
 				baseDir: command.sourceInfo.baseDir ?? path.dirname(command.sourceInfo.path),
 			};
 		}));
+	return commandSkillsCache;
 }
 
 function getQueuedSkillNames(): Set<string> {
