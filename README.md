@@ -46,7 +46,7 @@ You can also load multiple skills with Pi's `/skill:` syntax:
 /skill:typescript-code,react-best-practices,frontend-design build this component
 ```
 
-The extension accepts up to three different skills. If you omit the prompt, the skills are queued for your next message.
+The extension accepts up to three different skills. If you omit the prompt, the skills are queued for your next message. Autocomplete works as you type each `/skill:` segment, including comma-separated and repeated-prefix forms.
 
 ## Keyboard Shortcuts
 

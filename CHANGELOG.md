@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Add autocomplete for each skill segment in multi-skill `/skill:` commands.
 - Add Agent Plugins v1.0.0 package metadata with a root `plugin.json`.
 - Queue up to three different skills from `/skill`, with footer and widget copy that shows the queued count.
 - Load multiple skills in one `/skill:` message, including comma-separated forms such as `/skill:a,b,c`.
