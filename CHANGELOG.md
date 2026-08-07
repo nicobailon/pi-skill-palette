@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-08-07
+
 ### Added
 - Add autocomplete for each skill segment in multi-skill `/skill:` commands.
 - Add Agent Plugins v1.0.0 package metadata with a root `plugin.json`.
