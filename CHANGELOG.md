@@ -12,6 +12,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Queue up to three different skills from `/skill`, with footer and widget copy that shows the queued count.
 - Load multiple skills in one `/skill:` message, including comma-separated forms such as `/skill:a,b,c`.
 
+### Changed
+- Cache indexed skill commands so autocomplete does not rebuild and sort the skill list on each keystroke.
+
 ## [2.0.0] - 2026-07-30
 
 ### Removed
