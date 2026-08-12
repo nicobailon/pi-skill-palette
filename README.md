@@ -4,7 +4,7 @@
 
 # Pi Skill Palette
 
-A command palette for [Pi coding agent](https://github.com/earendil-works/pi) that lets you explicitly select up to three skills to inject with your next message.
+A command palette for [Pi coding agent](https://github.com/earendil-works/pi) that lets you explicitly select skills to inject with your next message or pin as standing instructions.
 
 ```
 /skill
@@ -14,7 +14,7 @@ A command palette for [Pi coding agent](https://github.com/earendil-works/pi) th
 
 ## Why
 
-Agents don't always know when to read their skills. Instead of relying on automatic detection based on task context, this extension gives you direct control. Select a skill from the palette and it gets sent alongside your next message.
+Agents don't always know when to read their skills. Instead of relying on automatic detection based on task context, this extension gives you direct control. Select a skill from the palette and it gets sent alongside your next message, or mark it as pinned instructions.
 
 ## Install
 
@@ -37,6 +37,20 @@ This package includes an [Agent Plugins](https://agent-plugins.org/) v1.0.0 `plu
 
 You can queue up to three different skills. Run `/skill` again to add another skill. The queued skills appear in the footer and widget until consumed. Re-select a queued skill to unqueue it (with confirmation).
 
+## Pinned Skills
+
+Add `pinned: true` to a skill's frontmatter when the skill should default to standing instructions from the palette:
+
+```markdown
+---
+name: my-skill
+description: Brief description of what this skill does
+pinned: true
+---
+```
+
+Selecting that skill in `/skill` pins it until you remove it from the palette. Pinned skills are appended to the system prompt on each turn. The `/skill:name` slash-command path still loads skills one time ahead of the next prompt, even when `pinned: true` is present.
+
 ## Multi-skill Commands
 
 You can also load multiple skills with Pi's `/skill:` syntax:
@@ -53,7 +67,7 @@ The extension accepts up to three different skills. If you omit the prompt, the 
 | Key | Action |
 |-----|--------|
 | `↑` / `↓` | Navigate skills |
-| `Enter` | Select / Unqueue skill |
+| `Enter` | Select / Remove skill |
 | `Esc` | Cancel |
 | `Tab` | Switch buttons (in confirmation dialog) |
 | `Y` / `N` | Quick confirm/cancel unqueue |
@@ -101,7 +115,7 @@ Theme values are ANSI SGR codes (`"36"` for cyan, `"2;3"` for dim+italic, `"38;2
 
 ## How It Works
 
-When you select a skill, it's queued in memory with visual indicators in the footer and widget. On your next message, all queued skill content is sent via the `before_agent_start` extension event as a custom message alongside your prompt. The palette uses pi's loaded skill list, so skill precedence, trust checks, package resources, configured paths, and deduplication are handled by pi.
+When you select a normal skill, it's queued in memory with visual indicators in the footer and widget. On your next message, all queued skill content is sent via the `before_agent_start` extension event as a custom message alongside your prompt. When a selected skill has `pinned: true`, it is kept in memory and appended to the system prompt on each turn until removed. The palette uses pi's loaded skill list, so skill precedence, trust checks, package resources, configured paths, and deduplication are handled by pi.
 
 ## Limitations
 

@@ -21,6 +21,7 @@ interface Skill {
 	description: string;
 	filePath: string;
 	baseDir: string;
+	pinByDefault: boolean;
 	searchName: string;
 	searchDescription: string;
 	sortIndex: number;
@@ -28,13 +29,17 @@ interface Skill {
 
 interface SkillPaletteState {
 	queuedSkills: Skill[];
+	pinnedSkills: Skill[];
 }
+
+type PaletteAction = "select" | "pin" | "unqueue" | "unpin" | "cancel";
 
 const MAX_QUEUED_SKILLS = 3;
 
 // Shared state across the extension
 const state: SkillPaletteState = {
 	queuedSkills: [],
+	pinnedSkills: [],
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -120,11 +125,31 @@ let loadedSkillsSource: ReturnType<ExtensionCommandContext["getSystemPromptOptio
 let loadedSkillsCache: Skill[] = [];
 let commandSkillsCache: Skill[] | null = null;
 
+function getSkillFrontmatter(filePath: string): string | null {
+	try {
+		const raw = fs.readFileSync(filePath, "utf-8");
+		if (!raw.startsWith("---")) return null;
+
+		const endIndex = raw.indexOf("\n---", 3);
+		if (endIndex === -1) return null;
+
+		return raw.slice(3, endIndex);
+	} catch {
+		return null;
+	}
+}
+
+function isPinnedByDefault(filePath: string): boolean {
+	const frontmatter = getSkillFrontmatter(filePath);
+	return frontmatter !== null && /^pinned:\s*true\s*(?:#.*)?$/im.test(frontmatter);
+}
+
 function indexSkills(skills: Array<Pick<Skill, "name" | "description" | "filePath" | "baseDir">>): Skill[] {
 	return [...skills]
 		.sort((a, b) => a.name.localeCompare(b.name))
 		.map((skill, sortIndex) => ({
 			...skill,
+			pinByDefault: isPinnedByDefault(skill.filePath),
 			searchName: skill.name.toLowerCase(),
 			searchDescription: skill.description.toLowerCase(),
 			sortIndex,
@@ -164,6 +189,10 @@ function getQueuedSkillNames(): Set<string> {
 	return new Set(state.queuedSkills.map((skill) => skill.name));
 }
 
+function getPinnedSkillNames(): Set<string> {
+	return new Set(state.pinnedSkills.map((skill) => skill.name));
+}
+
 function formatSkillList(skills: Skill[]): string {
 	return skills.map((skill) => skill.name).join(", ");
 }
@@ -189,21 +218,44 @@ function queueSkills(skills: Skill[]): QueueSkillsResult {
 	return { status: "queued" };
 }
 
+function pinSkill(skill: Skill): void {
+	if (getPinnedSkillNames().has(skill.name)) return;
+	state.pinnedSkills = [...state.pinnedSkills, skill];
+}
+
 function removeQueuedSkill(skill: Skill): void {
 	state.queuedSkills = state.queuedSkills.filter((queuedSkill) => queuedSkill.name !== skill.name);
 }
 
-function updateQueuedSkillIndicators(ctx: Pick<ExtensionContext, "ui">, skills = state.queuedSkills): void {
-	if (skills.length === 0) {
+function removePinnedSkill(skill: Skill): void {
+	state.pinnedSkills = state.pinnedSkills.filter((pinnedSkill) => pinnedSkill.name !== skill.name);
+}
+
+function updateSkillIndicators(ctx: Pick<ExtensionContext, "ui">): void {
+	const queuedSkills = state.queuedSkills;
+	const pinnedSkills = state.pinnedSkills;
+	if (queuedSkills.length === 0 && pinnedSkills.length === 0) {
 		ctx.ui.setStatus("skill", undefined);
 		ctx.ui.setWidget("skill", undefined);
 		return;
 	}
 
-	const names = formatSkillList(skills);
-	const count = `${skills.length}/${MAX_QUEUED_SKILLS}`;
-	ctx.ui.setStatus("skill", `📚 ${count} ${names}`);
-	ctx.ui.setWidget("skill", [`\x1b[2m📚 Skills (${count}): \x1b[0m\x1b[36m${names}\x1b[0m\x1b[2m — will be applied to next message\x1b[0m`]);
+	const statusParts: string[] = [];
+	const widgetLines: string[] = [];
+	if (queuedSkills.length > 0) {
+		const names = formatSkillList(queuedSkills);
+		const count = `${queuedSkills.length}/${MAX_QUEUED_SKILLS}`;
+		statusParts.push(`📚 ${count} ${names}`);
+		widgetLines.push(`\x1b[2m📚 Queued (${count}): \x1b[0m\x1b[36m${names}\x1b[0m\x1b[2m — will be applied to next message\x1b[0m`);
+	}
+	if (pinnedSkills.length > 0) {
+		const names = formatSkillList(pinnedSkills);
+		statusParts.push(`📌 ${names}`);
+		widgetLines.push(`\x1b[2m📌 Pinned: \x1b[0m\x1b[36m${names}\x1b[0m\x1b[2m — active as instructions\x1b[0m`);
+	}
+
+	ctx.ui.setStatus("skill", statusParts.join("  "));
+	ctx.ui.setWidget("skill", widgetLines);
 }
 
 function escapeAttribute(value: string): string {
@@ -231,6 +283,10 @@ function buildSkillContext(skills: Skill[]): string {
 
 	if (blocks.length === 1) return blocks[0];
 	return `<skills count="${blocks.length}">\n${blocks.join("\n\n")}\n</skills>`;
+}
+
+function buildPinnedSkillPrompt(skills: Skill[]): string {
+	return `Pinned skill instructions:\n${buildSkillContext(skills)}`;
 }
 
 /**
@@ -503,7 +559,7 @@ class ConfirmDialog {
 		const emptyRow = () => border("│") + " ".repeat(innerW) + border("│");
 
 		// Top border with title
-		const titleText = " Unqueue Skill ";
+		const titleText = " Remove Skill ";
 		const borderLen = innerW - visLen(titleText);
 		const leftBorder = Math.floor(borderLen / 2);
 		const rightBorder = borderLen - leftBorder;
@@ -573,15 +629,21 @@ class SkillPaletteComponent {
 	private inactivityTimeout: ReturnType<typeof setTimeout> | null = null;
 	private static readonly INACTIVITY_MS = 60000; // Auto-dismiss after 60s of no input
 
+	private pinnedSkillNames: Set<string>;
+	private pinnedSkillCount: number;
+
 	constructor(
 		skills: Skill[],
 		queuedSkills: Skill[],
-		private done: (skill: Skill | null, action: "select" | "unqueue" | "cancel") => void
+		pinnedSkills: Skill[],
+		private done: (skill: Skill | null, action: PaletteAction) => void
 	) {
 		this.allSkills = skills;
 		this.filtered = skills;
 		this.queuedSkillNames = new Set(queuedSkills.map((skill) => skill.name));
 		this.queuedSkillCount = queuedSkills.length;
+		this.pinnedSkillNames = new Set(pinnedSkills.map((skill) => skill.name));
+		this.pinnedSkillCount = pinnedSkills.length;
 		this.resetInactivityTimeout();
 	}
 
@@ -606,11 +668,12 @@ class SkillPaletteComponent {
 			const skill = this.filtered[this.selected];
 			if (skill) {
 				this.cleanup();
-				// Toggle: if already queued, unqueue it
-				if (this.queuedSkillNames.has(skill.name)) {
+				if (this.pinnedSkillNames.has(skill.name)) {
+					this.done(skill, "unpin");
+				} else if (this.queuedSkillNames.has(skill.name)) {
 					this.done(skill, "unqueue");
 				} else {
-					this.done(skill, "select");
+					this.done(skill, skill.pinByDefault ? "pin" : "select");
 				}
 			}
 			return;
@@ -714,16 +777,17 @@ class SkillPaletteComponent {
 				const skill = this.filtered[i];
 				const isSelected = i === this.selected;
 				const isQueued = this.queuedSkillNames.has(skill.name);
+				const isPinned = this.pinnedSkillNames.has(skill.name);
 
 				// Build the skill line
 				const prefix = isSelected ? selected("▸") : border("·");
-				const queuedBadge = isQueued ? ` ${queued("●")}` : "";
+				const activeBadge = isPinned ? ` ${queued("◆")}` : isQueued ? ` ${queued("●")}` : skill.pinByDefault ? ` ${hint("◇")}` : "";
 				const nameStr = isSelected ? bold(selectedText(skill.name)) : skill.name;
 				const maxDescLen = Math.max(0, innerW - visLen(skill.name) - 12);
 				const descStr = maxDescLen > 3 ? description(truncateToWidth(skill.description, maxDescLen, "…")) : "";
 
 				const separator = descStr ? `  ${border("—")}  ` : "";
-				const skillLine = `${prefix} ${nameStr}${queuedBadge}${separator}${descStr}`;
+				const skillLine = `${prefix} ${nameStr}${activeBadge}${separator}${descStr}`;
 				lines.push(row(skillLine));
 			}
 			lines.push(emptyRow());
@@ -745,9 +809,9 @@ class SkillPaletteComponent {
 
 		// Footer hints - minimal and elegant
 		const count = `${this.queuedSkillCount}/${MAX_QUEUED_SKILLS}`;
-		const hints = this.queuedSkillCount > 0
-			? `${italic("↑↓")} navigate  ${italic("enter")} select${hint("/")}unqueue  ${hint(count)} queued  ${italic("esc")} cancel`
-			: `${italic("↑↓")} navigate  ${italic("enter")} select  ${hint(count)} queued  ${italic("esc")} cancel`;
+		const pinned = this.pinnedSkillCount > 0 ? `  ${hint(`${this.pinnedSkillCount} pinned`)}` : "";
+		const action = this.queuedSkillCount > 0 || this.pinnedSkillCount > 0 ? `select${hint("/")}remove` : "select";
+		const hints = `${italic("↑↓")} navigate  ${italic("enter")} ${action}  ${hint(count)} queued${pinned}  ${italic("esc")} cancel`;
 		lines.push(row(hint(hints)));
 
 		// Bottom border
@@ -818,7 +882,7 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 
 	// Register the /skill command
 	pi.registerCommand("skill", {
-		description: "Open skill palette to select a skill for the next message",
+		description: "Open skill palette to queue or pin a skill",
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
 			if (ctx.mode !== "tui") {
 				if (ctx.hasUI) {
@@ -836,10 +900,11 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 			}
 
 			// Show the overlay and wait for result
-			const result = await ctx.ui.custom<{ skill: Skill | null; action: "select" | "unqueue" | "cancel" }>(
+			const result = await ctx.ui.custom<{ skill: Skill | null; action: PaletteAction }>(
 				(_tui, _theme, _keybindings, done) => new SkillPaletteComponent(
 					skills,
 					state.queuedSkills,
+					state.pinnedSkills,
 					(skill, action) => done({ skill, action })
 				),
 				{ overlay: true, overlayOptions: { anchor: "center", width: 70 } }
@@ -851,9 +916,13 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 					ctx.ui.notify(`You can queue up to ${MAX_QUEUED_SKILLS} skills. Unqueue one first.`, "warning");
 					return;
 				}
-				updateQueuedSkillIndicators(ctx);
+				updateSkillIndicators(ctx);
 				ctx.ui.notify(`Skill queued (${state.queuedSkills.length}/${MAX_QUEUED_SKILLS}): ${result.skill.name}`, "info");
-			} else if (result.action === "unqueue" && result.skill) {
+			} else if (result.action === "pin" && result.skill) {
+				pinSkill(result.skill);
+				updateSkillIndicators(ctx);
+				ctx.ui.notify(`Skill pinned: ${result.skill.name}`, "info");
+			} else if ((result.action === "unqueue" || result.action === "unpin") && result.skill) {
 				const skill = result.skill;
 				const confirmed = await ctx.ui.custom<boolean>(
 					(tui, _theme, _keybindings, done) => {
@@ -865,9 +934,14 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 				);
 
 				if (confirmed) {
-					removeQueuedSkill(skill);
-					updateQueuedSkillIndicators(ctx);
-					ctx.ui.notify(`Skill unqueued: ${skill.name}`, "info");
+					if (result.action === "unqueue") {
+						removeQueuedSkill(skill);
+						ctx.ui.notify(`Skill unqueued: ${skill.name}`, "info");
+					} else {
+						removePinnedSkill(skill);
+						ctx.ui.notify(`Skill unpinned: ${skill.name}`, "info");
+					}
+					updateSkillIndicators(ctx);
 				}
 			}
 		},
@@ -890,6 +964,7 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 		const uniqueSkills = parsed.skills.filter((skill, index, skills) =>
 			skills.findIndex((candidate) => candidate.name === skill.name) === index
 		);
+		// Slash-loaded skills stay one-shot, even if a skill declares pinned: true.
 		const queueResult = queueSkills(uniqueSkills);
 		if (queueResult.status === "full") {
 			if (ctx.hasUI) {
@@ -898,7 +973,7 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 			return { action: "handled" as const };
 		}
 		if (ctx.hasUI) {
-			updateQueuedSkillIndicators(ctx);
+			updateSkillIndicators(ctx);
 			ctx.ui.notify(`Queued ${state.queuedSkills.length}/${MAX_QUEUED_SKILLS} skills: ${formatSkillList(state.queuedSkills)}`, "info");
 		}
 
@@ -908,32 +983,34 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 		return { action: "transform" as const, text: parsed.prompt };
 	});
 
-	// Handle the before_agent_start event to send skill content as custom message
-	pi.on("before_agent_start", async (_event, ctx) => {
-		if (state.queuedSkills.length === 0) {
+	// Handle the before_agent_start event to send queued skills once and pinned skills as instructions.
+	pi.on("before_agent_start", async (event, ctx) => {
+		if (state.queuedSkills.length === 0 && state.pinnedSkills.length === 0) {
 			return {};
 		}
 
-		const skills = state.queuedSkills;
+		const queuedSkills = state.queuedSkills;
+		const pinnedSkills = state.pinnedSkills;
 		state.queuedSkills = [];
-
-		// Clear the visual indicators (use optional chaining for non-UI contexts)
-		ctx.ui?.setStatus("skill", undefined);
-		ctx.ui?.setWidget("skill", undefined);
+		updateSkillIndicators(ctx);
 
 		try {
 			return {
-				message: {
-					customType: "skill-context",
-					// Mirrors pi's own skill expansion so relative references inside a skill
-					// resolve against the skill directory rather than the cwd.
-					content: buildSkillContext(skills),
-					display: true,  // Show the skill injection in chat
-				},
+				...(queuedSkills.length > 0 ? {
+					message: {
+						customType: "skill-context",
+						// Mirrors pi's own skill expansion so relative references inside a skill
+						// resolve against the skill directory rather than the cwd.
+						content: buildSkillContext(queuedSkills),
+						display: true,  // Show the skill injection in chat
+					},
+				} : {}),
+				...(pinnedSkills.length > 0 ? {
+					systemPrompt: `${event.systemPrompt}\n\n${buildPinnedSkillPrompt(pinnedSkills)}`,
+				} : {}),
 			};
 		} catch {
-			ctx.ui?.setWidget("skill", undefined);
-			ctx.ui?.notify(`Failed to load queued skills: ${formatSkillList(skills)}`, "warning");
+			ctx.ui?.notify(`Failed to load selected skills: ${formatSkillList([...queuedSkills, ...pinnedSkills])}`, "warning");
 			return {};
 		}
 	});

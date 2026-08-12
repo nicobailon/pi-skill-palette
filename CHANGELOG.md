@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Add `pinned: true` skill frontmatter support so palette-selected skills can stay active as system instructions while `/skill:` slash commands remain one-shot.
+
 ## [2.1.0] - 2026-08-07
 
 ### Added
