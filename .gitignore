@@ -5,4 +5,5 @@ theme.json
 package-lock.json
 progress.md
 node_modules/
+.pi/
 .pi-subagents/
