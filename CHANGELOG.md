@@ -6,8 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-08-12
+
 ### Added
 - Add `pinned: true` skill frontmatter support so palette-selected skills can stay active as system instructions while `/skill:` slash commands remain one-shot.
+
+### Changed
+- Tighten palette result handling with explicit action states.
+- Keep the Agent Plugins manifest version aligned with package releases.
+
+### Fixed
+- Ignore repo-local `.pi/` agent artifacts so they stay out of npm package output.
 
 ## [2.1.0] - 2026-08-07
 

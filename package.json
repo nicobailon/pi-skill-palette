@@ -1,9 +1,11 @@
 {
 	"name": "pi-skill-palette",
-	"version": "2.1.0",
+	"version": "2.2.0",
 	"description": "VS Code-style command palette for selecting and applying skills in pi",
 	"main": "index.ts",
-	"keywords": ["pi-package"],
+	"keywords": [
+		"pi-package"
+	],
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/nicobailon/pi-skill-palette"
@@ -15,6 +17,8 @@
 		"@earendil-works/pi-tui": ">=0.83.0"
 	},
 	"pi": {
-		"extensions": ["./index.ts"]
+		"extensions": [
+			"./index.ts"
+		]
 	}
 }
