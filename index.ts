@@ -32,7 +32,10 @@ interface SkillPaletteState {
 	pinnedSkills: Skill[];
 }
 
-type PaletteAction = "select" | "pin" | "unqueue" | "unpin" | "cancel";
+type PaletteAction = "select" | "pin" | "unqueue" | "unpin";
+type PaletteResult =
+	| { action: "cancel"; skill: null }
+	| { action: PaletteAction; skill: Skill };
 
 const MAX_QUEUED_SKILLS = 3;
 
@@ -636,7 +639,7 @@ class SkillPaletteComponent {
 		skills: Skill[],
 		queuedSkills: Skill[],
 		pinnedSkills: Skill[],
-		private done: (skill: Skill | null, action: PaletteAction) => void
+		private done: (result: PaletteResult) => void
 	) {
 		this.allSkills = skills;
 		this.filtered = skills;
@@ -651,7 +654,7 @@ class SkillPaletteComponent {
 		if (this.inactivityTimeout) clearTimeout(this.inactivityTimeout);
 		this.inactivityTimeout = setTimeout(() => {
 			this.cleanup();
-			this.done(null, "cancel");
+			this.done({ action: "cancel", skill: null });
 		}, SkillPaletteComponent.INACTIVITY_MS);
 	}
 
@@ -660,7 +663,7 @@ class SkillPaletteComponent {
 
 		if (matchesKey(data, "escape")) {
 			this.cleanup();
-			this.done(null, "cancel");
+			this.done({ action: "cancel", skill: null });
 			return;
 		}
 
@@ -669,11 +672,11 @@ class SkillPaletteComponent {
 			if (skill) {
 				this.cleanup();
 				if (this.pinnedSkillNames.has(skill.name)) {
-					this.done(skill, "unpin");
+					this.done({ action: "unpin", skill });
 				} else if (this.queuedSkillNames.has(skill.name)) {
-					this.done(skill, "unqueue");
+					this.done({ action: "unqueue", skill });
 				} else {
-					this.done(skill, skill.pinByDefault ? "pin" : "select");
+					this.done({ action: skill.pinByDefault ? "pin" : "select", skill });
 				}
 			}
 			return;
@@ -781,7 +784,14 @@ class SkillPaletteComponent {
 
 				// Build the skill line
 				const prefix = isSelected ? selected("▸") : border("·");
-				const activeBadge = isPinned ? ` ${queued("◆")}` : isQueued ? ` ${queued("●")}` : skill.pinByDefault ? ` ${hint("◇")}` : "";
+				let activeBadge = "";
+				if (isPinned) {
+					activeBadge = ` ${queued("◆")}`;
+				} else if (isQueued) {
+					activeBadge = ` ${queued("●")}`;
+				} else if (skill.pinByDefault) {
+					activeBadge = ` ${hint("◇")}`;
+				}
 				const nameStr = isSelected ? bold(selectedText(skill.name)) : skill.name;
 				const maxDescLen = Math.max(0, innerW - visLen(skill.name) - 12);
 				const descStr = maxDescLen > 3 ? description(truncateToWidth(skill.description, maxDescLen, "…")) : "";
@@ -900,40 +910,47 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 			}
 
 			// Show the overlay and wait for result
-			const result = await ctx.ui.custom<{ skill: Skill | null; action: PaletteAction }>(
+			const result = await ctx.ui.custom<PaletteResult>(
 				(_tui, _theme, _keybindings, done) => new SkillPaletteComponent(
 					skills,
 					state.queuedSkills,
 					state.pinnedSkills,
-					(skill, action) => done({ skill, action })
+					done
 				),
 				{ overlay: true, overlayOptions: { anchor: "center", width: 70 } }
 			);
 
-			if (result.action === "select" && result.skill) {
-				const queueResult = queueSkills([result.skill]);
-				if (queueResult.status === "full") {
-					ctx.ui.notify(`You can queue up to ${MAX_QUEUED_SKILLS} skills. Unqueue one first.`, "warning");
+			switch (result.action) {
+				case "cancel":
+					return;
+				case "select": {
+					const queueResult = queueSkills([result.skill]);
+					if (queueResult.status === "full") {
+						ctx.ui.notify(`You can queue up to ${MAX_QUEUED_SKILLS} skills. Unqueue one first.`, "warning");
+						return;
+					}
+					updateSkillIndicators(ctx);
+					ctx.ui.notify(`Skill queued (${state.queuedSkills.length}/${MAX_QUEUED_SKILLS}): ${result.skill.name}`, "info");
 					return;
 				}
-				updateSkillIndicators(ctx);
-				ctx.ui.notify(`Skill queued (${state.queuedSkills.length}/${MAX_QUEUED_SKILLS}): ${result.skill.name}`, "info");
-			} else if (result.action === "pin" && result.skill) {
-				pinSkill(result.skill);
-				updateSkillIndicators(ctx);
-				ctx.ui.notify(`Skill pinned: ${result.skill.name}`, "info");
-			} else if ((result.action === "unqueue" || result.action === "unpin") && result.skill) {
-				const skill = result.skill;
-				const confirmed = await ctx.ui.custom<boolean>(
-					(tui, _theme, _keybindings, done) => {
-						const dialog = new ConfirmDialog(skill.name, done);
-						dialog.setRequestRender(() => tui.requestRender());
-						return dialog;
-					},
-					{ overlay: true, overlayOptions: { anchor: "center", width: 44 } }
-				);
+				case "pin":
+					pinSkill(result.skill);
+					updateSkillIndicators(ctx);
+					ctx.ui.notify(`Skill pinned: ${result.skill.name}`, "info");
+					return;
+				case "unqueue":
+				case "unpin": {
+					const skill = result.skill;
+					const confirmed = await ctx.ui.custom<boolean>(
+						(tui, _theme, _keybindings, done) => {
+							const dialog = new ConfirmDialog(skill.name, done);
+							dialog.setRequestRender(() => tui.requestRender());
+							return dialog;
+						},
+						{ overlay: true, overlayOptions: { anchor: "center", width: 44 } }
+					);
 
-				if (confirmed) {
+					if (!confirmed) return;
 					if (result.action === "unqueue") {
 						removeQueuedSkill(skill);
 						ctx.ui.notify(`Skill unqueued: ${skill.name}`, "info");
@@ -942,6 +959,7 @@ export default function skillPaletteExtension(pi: ExtensionAPI): void {
 						ctx.ui.notify(`Skill unpinned: ${skill.name}`, "info");
 					}
 					updateSkillIndicators(ctx);
+					return;
 				}
 			}
 		},
